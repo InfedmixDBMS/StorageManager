@@ -2,6 +2,7 @@
 IO.py (Working Title)
 
 Fetch data in blocks, 
+Ini class paling low level yang cuma ngebaca dan menulis ke blok
 """
 
 from classes.globals import BLOCK_SIZE
@@ -24,4 +25,9 @@ class IO:
             f.write(data.ljust(BLOCK_SIZE, b'\x00'))
 
     def delete(self, block_idx: int) -> int:
+        """
+            Ini cuma bakal di pake di defragmentasi, cuma ngehapus kalo semua data di blok tuh bener2 0 doang
+
+            NOTE: kayaknya ga perlu sih ini, defragment full rewrite
+        """
         pass

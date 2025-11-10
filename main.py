@@ -10,13 +10,18 @@ if __name__ == "__main__":
     storageIO = IO(s.schema["file_path"])
     
     dummy = [
-        [2147483647, "Alif", 2.3],
-        [2147483647, "Alif", 2.3],
-        [2147483647, "Alif", 2.3],
-        [2147483647, "Alif", 2.3],
-        ]
+        [101, "Alice Wonderland", 3.8],
+        [102, "Bob Builder", 3.5],
+        [103, "Charlie Chaplin", 3.9],
+        [104, "David Beckham", 3.2],
+        [105, "Eva Green", 4.0]
+    ]
 
     data = s.serialize(dummy)
+    print(data)
+
     storageIO.write(0, data)
-    read_data = storageIO.read(0)
-    print(read_data)
+    data = storageIO.read(0)
+
+    deserialized = s.deserialize(data)
+    print(deserialized)
