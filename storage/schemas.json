@@ -1,7 +1,7 @@
 {
   "mahasiswa": {
     "file_path": "data/mahasiswa.dat",
-    "row_size": 58,
+    "row_size": 66,
     "columns": [
       {"name": "id", "type": "int", "length": 4},
       {"name": "nama", "type": "varchar", "length": 50},
