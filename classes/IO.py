@@ -9,17 +9,19 @@ from classes.globals import BLOCK_SIZE
 class IO:
     def __init__(self, file_path: str):
         self.file_path = file_path
-        self.file_handle = open(file_path, 'rb')
 
     def read(self, block_idx: int) -> bytes:
-        self.file_handle.seek(BLOCK_SIZE * block_idx)
-        return self.file_handle.read(BLOCK_SIZE)
+        with open(self.file_path, "rb") as f:
+            f.seek(BLOCK_SIZE * block_idx)
+            return f.read(BLOCK_SIZE)
 
     def write(self, block_idx: int, data: bytes) -> int:
         """
-        data - deserialized data
+        data - serialized data
         """
-        pass
+        with open(self.file_path, "wb") as f:
+            f.seek(BLOCK_SIZE * block_idx)
+            f.write(data.ljust(BLOCK_SIZE, b'\x00'))
 
     def delete(self, block_idx: int) -> int:
         pass

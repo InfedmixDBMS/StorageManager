@@ -28,8 +28,12 @@ class StorageEngine:
     def set_index(table: str, column:str, index_type: str) -> None:
         pass
 
+    
     def get_stats():
         """
             Returns a statistic object
         """
+        pass
+
+    def defragment(table: str):
         pass

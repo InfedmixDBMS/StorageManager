@@ -2,6 +2,7 @@ import json
 import struct
 
 SCHEMA_FILE = "storage/schemas.json"
+from classes.IO import IO
 
 class Serializer:
     def __init__(self):
@@ -67,6 +68,9 @@ class Serializer:
         """
         pass
 
+    def h_generate_header(self):
+        pass
+
     def h_build_format_string(self):
         fmt = "<" # little-endian
 
@@ -78,15 +82,28 @@ class Serializer:
             elif col['type'] == "char":
                 fmt += f"{col['length']}s"
         # TODO: differentiate char and varchar
+        # varchar will have a 4 byte metadata for the length, for now (max length - MAXINT)
             elif col['type'] == "varchar":
-                fmt += f"{col['length']}s"
+                fmt += f"{col['length']+4}s"
 
         return fmt
 
 if __name__ == "__main__":
     s = Serializer()
     s.load_schema("mahasiswa")
+    io = IO(s.schema["file_path"])
     
-    dummy = [[2147483647, "Alif", "13523045", 2.3]]
+    dummy = [
+        [2147483647, "Alif", "13523045", 2.3],
+        [2147483647, "Alif", "13523045", 2.3],
+        [2147483647, "Alif", "13523045", 2.3],
+        [2147483647, "Alif", "13523045", 2.3],
+        ]
 
-    print(s.serialize(dummy))
+    data = s.serialize(dummy)
+    IO.write(data)
+
+
+
+
+    
