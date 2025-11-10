@@ -2,7 +2,7 @@
 IO.py (Working Title)
 
 Fetch data in blocks, 
-Ini class paling low level yang cuma ngebaca dan menulis ke blok
+Ini class paling "low level" yang cuma ngebaca dan menulis ke blok
 """
 
 from classes.globals import BLOCK_SIZE

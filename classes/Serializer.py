@@ -41,12 +41,14 @@ class Serializer:
         if (not self.schema or self.schema == None):
             return b"\xde\xad\xc0\xde"
 
-        bytes_data = [] # rows in bytes
+        bytes_data : list[bytes] = [] # menyimpan setiap row sebagai bytes
 
         for tuple in data_list:
-            prepared_values = []
+            prepared_values : list[bytes] = []  # menyimpan setiap kolom sebagai bytes
 
             for column, value in zip(self.schema['columns'], tuple):
+                packed_value : bytes = b''
+                
                 if column['type'] == 'int':
                     packed_value = struct.pack('<i', value)
                     prepared_values.append(packed_value)
@@ -56,34 +58,32 @@ class Serializer:
                     prepared_values.append(packed_value)
 
                 elif column['type'] == 'char':
-                    value = str(value).encode('utf-8')
-                    column_length = column['length']
+                    packed_value = str(value).encode('utf-8')
+                    column_length : int = column['length']
 
-                    if len(value) > column_length:
-                        value = value[:column_length]
+                    if len(packed_value) > column_length:
+                        packed_value = packed_value[:column_length]
                     else:
-                        value = value.ljust(column_length, '\x00')
+                        packed_value = packed_value.ljust(column_length, '\x00')
                     
-                    packed_value = value
                     prepared_values.append(packed_value)
                 
                 elif column['type'] == 'varchar':
-                    value = str(value).encode('utf-8')
-                    column_length = column['length']
-                    data_length = len(value)
+                    packed_value = str(value).encode('utf-8')
+                    column_length : int = column['length']
+                    data_length : int = len(packed_value)
 
                     if data_length > column_length:
-                        value = value[:column_length]
-                        data_length = len(value)
+                        packed_value = packed_value[:column_length]
+                        data_length = len(packed_value)
                     
-                    packed_length = struct.pack('<H', data_length)
-                    packed_value = value
+                    packed_length : bytes = struct.pack('<H', data_length)
                     prepared_values.append(packed_length)
                     prepared_values.append(packed_value)
 
-            tuple_data = b''.join(prepared_values)
-            tuple_length = len(tuple_data)
-            row_header = struct.pack(ROW_HEADER, b'A', tuple_length)
+            tuple_data : bytes = b''.join(prepared_values)
+            tuple_length : int = len(tuple_data)
+            row_header : bytes = struct.pack(ROW_HEADER, b'A', tuple_length)
             bytes_data.append(row_header + tuple_data)
 
         return b''.join(bytes_data)
@@ -94,20 +94,20 @@ class Serializer:
         if (not self.schema or self.schema == None):
             return b"\xde\xad\xc0\xde"
 
-        pointer = 0
-        data = []
-        header_size = struct.calcsize(ROW_HEADER)
+        pointer : int = 0
+        data : list[list] = []  # list of rows
+        header_size : int = struct.calcsize(ROW_HEADER)
 
         while pointer < len(raw_data):
         # === HEADER PROCESSING
             if pointer + header_size > len(raw_data):
                 break   
 
-            tuple_header = raw_data[pointer : pointer+header_size]
+            tuple_header : bytes = raw_data[pointer : pointer+header_size]
             delete_flag, tuple_length = struct.unpack(ROW_HEADER, tuple_header)
             pointer += header_size
 
-            if delete_flag == b"D":
+            if delete_flag == b"D" or delete_flag == b'\x00':
                 pointer += tuple_length
                 continue
 
@@ -115,32 +115,33 @@ class Serializer:
             if pointer + tuple_length > len(raw_data):
                 break
 
-            tuple_data = raw_data[pointer : pointer+tuple_length]
+            tuple_data : bytes = raw_data[pointer : pointer+tuple_length]
             pointer += tuple_length
 
-            tuple_pointer = 0
-            tuple = []
+            tuple_pointer : int = 0
+            tuple : list = []
             for col in self.schema['columns']:
                 if col['type'] == 'int':
-                    value = struct.unpack('<i', tuple_data[tuple_pointer : tuple_pointer + 4])[0]
+                    value : int = struct.unpack('<i', tuple_data[tuple_pointer : tuple_pointer + 4])[0]
                     tuple.append(value)
                     tuple_pointer += 4
 
                 elif col['type'] == 'float':
-                    value = struct.unpack('<f', tuple_data[tuple_pointer : tuple_pointer + 4])[0]
+                    value : float = struct.unpack('<f', tuple_data[tuple_pointer : tuple_pointer + 4])[0]
                     tuple.append(value)
                     tuple_pointer += 4
 
                 elif col['type'] == 'char':
-                    length = col['length']
-                    value = tuple_data[tuple_pointer : tuple_pointer + length].rstrip(b'\x00').decode('utf-8')
+                    length : int = col['length']
+                    value : str = tuple_data[tuple_pointer : tuple_pointer + length].rstrip(b'\x00').decode('utf-8')
                     tuple.append(value)
                     tuple_pointer += length
 
                 elif col['type'] == 'varchar':
-                    str_length = struct.unpack('<H', tuple_data[tuple_pointer : tuple_pointer + 2])[0]
+                    str_length : int = struct.unpack('<H', tuple_data[tuple_pointer : tuple_pointer + 2])[0]
                     tuple_pointer += 2
-                    value = tuple_data[tuple_pointer : tuple_pointer + str_length].decode('utf-8')
+
+                    value : str = tuple_data[tuple_pointer : tuple_pointer + str_length].decode('utf-8')
                     tuple.append(value)
                     tuple_pointer += str_length
 

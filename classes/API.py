@@ -4,7 +4,7 @@ API.py (Working Title)
 The main class that other components will call. Contains the storage engine class as shown in spec
 """
 
-from temporary.InputObjects import DataRetrieval, DataWrite, DataDeletion, Condition
+from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic
 
 class StorageEngine:
     def read_block(data_retrieval: DataRetrieval) -> list[list]:
@@ -29,11 +29,12 @@ class StorageEngine:
         pass
 
     
-    def get_stats():
+    def get_stats() -> Statistic:
         """
             Returns a statistic object
         """
         pass
 
-    def defragment(table: str):
+    # secara otomatis bakal ngelakuin vacuuming juga
+    def defragment(table: str) -> bool:
         pass

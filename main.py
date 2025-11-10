@@ -17,11 +17,12 @@ if __name__ == "__main__":
         [105, "Eva Green", 4.0]
     ]
 
-    data = s.serialize(dummy)
-    print(data)
+    # data = s.serialize(dummy)
+    # print(data)
 
-    storageIO.write(0, data)
+    # storageIO.write(0, data)
     data = storageIO.read(0)
 
     deserialized = s.deserialize(data)
+    print("\n")
     print(deserialized)
