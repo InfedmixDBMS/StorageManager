@@ -29,6 +29,7 @@ class Serializer:
             return b"\xde\xad\xc0\xde"
 
         fmt = self.h_build_format_string()
+        print(f"Format: " + fmt)
         data_rows = [] # rows in bytes
 
         for row in data_list:
@@ -58,6 +59,12 @@ class Serializer:
 
 
     def deserialize(self, raw_data: bytes) -> list[list]:
+        pass
+
+    def create_file(file_path: str):
+        """
+            Create file with header
+        """
         pass
 
     def h_build_format_string(self):
