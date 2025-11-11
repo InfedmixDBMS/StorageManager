@@ -133,7 +133,8 @@ class Serializer:
 
                 elif col['type'] == 'char':
                     length : int = col['length']
-                    value : str = tuple_data[tuple_pointer : tuple_pointer + length].rstrip(b'\x00').decode('utf-8')
+                    # ini langsung strip null byte dan padding pake spasi
+                    value : str = tuple_data[tuple_pointer : tuple_pointer + length].rstrip(b'\x00').decode('utf-8').ljust(length, ' ')
                     tuple.append(value)
                     tuple_pointer += length
 
@@ -147,21 +148,7 @@ class Serializer:
 
             data.append(tuple)
         return data
-
-            
-
-
-
-    def create_file(file_path: str):
-        """
-            Create file with header
-        """
-        pass
-
-
-
-    def h_generate_header(self):
-        pass
+    
 
 if __name__ == "__main__":
     s = Serializer()

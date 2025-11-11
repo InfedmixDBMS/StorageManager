@@ -1,12 +1,14 @@
 # Infedmix-StorageManager
 
 ## Beberapa Hal:
+
 ### Basic Storage
 - Implementasi storage 1 file per table
 - Block size 1024 bytes
 - Buat unspanned tuple yang cross block di handle
 - Write defaut ke blok terakhir, ga perlu urusin freespace, defrag berkala manual
 
+### Connection to other components
 - Kita filtering --- query processor yang projection
 - Row size ambil maks, irrespective of varchar sizes
 
@@ -34,5 +36,4 @@
 
 ## List Classes
 - Serializer
-
 - IO
