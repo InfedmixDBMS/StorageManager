@@ -6,10 +6,17 @@ from classes.Types import DataType, IntType, FloatType, CharType, VarCharType
 T = TypeVar("T")
 
 class Schema:
+    """
+        Schema.columns nyimpan gini:
+        "id" = IntType()
+        "name" = VarCharType(50)
+        "ipk" = FloatType()
+    """
     def __init__(self, **columns: DataType) -> None:
         self.columns = columns
         self.column_order = list(columns.keys())
         self.column_index = {name: i for i, name in enumerate(self.column_order)}
+        self.size = self.calculate_row_size()
 
     def validate_tuple(self, values: Any) -> None:
         if len(values) != len(self.columns):
@@ -17,12 +24,28 @@ class Schema:
         for dtype, value in zip(self.columns.values(), values):
             dtype.validate(value)
 
+    def calculate_row_size(self) -> int:
+        size : int = 0
+        for dtype in self.columns.values():
+            if isinstance(dtype, IntType):
+                size += 4
+            elif isinstance(dtype, FloatType):
+                size += 4
+            elif isinstance(dtype, CharType):
+                size += dtype.length
+            elif isinstance(dtype, VarCharType):
+                size += dtype.max_length
+        return size
+
 class Tuple:
+    __slots__ = ['schema', 'values']
     def __init__(self, schema: Schema, *values: Any) -> None:
         if len(values) != len(schema.columns):
             raise ValueError("Value count doesn't match schema")
+        
         for dtype, value in zip(schema.columns.values(), values):
             dtype.validate(value)
+
         self.schema = schema
         self.values = list(values)
 
