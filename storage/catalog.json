@@ -1,0 +1,21 @@
+{
+  "student": {
+    "file_path": "storage/data/student.dat",
+    "row_size": 58,
+    "columns": [
+      {"name": "id", "type": "int", "length": 4},
+      {"name": "name", "type": "varchar", "length": 50},
+      {"name": "ipk", "type": "float", "length": 4}
+    ]
+  },
+  "course": {
+    "file_path": "storage/data/course.dat",
+    "row_size": 1058,
+    "columns": [
+      {"name": "id", "type": "int", "length": 4},
+      {"name": "year", "type": "int", "length": 4},
+      {"name": "name", "type": "varchar", "length": 50},
+      {"name": "description", "type": "varchar", "length": 10000}
+    ]
+  }
+}

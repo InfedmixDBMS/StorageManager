@@ -5,6 +5,10 @@ The main class that other components will call. Contains the storage engine clas
 """
 
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic
+from classes.DataModels import Schema
+from classes.globals import CATALOG_FILE
+from typing import Dict
+import json
 
 class StorageEngine:
     def read_block(data_retrieval: DataRetrieval) -> list[list]:
@@ -28,13 +32,64 @@ class StorageEngine:
     def set_index(table: str, column:str, index_type: str) -> None:
         pass
 
-    
-    def get_stats() -> Statistic:
+    # TODO: create sama drop masih soft delete (fileny gak di delete)
+    def create_table(self, table_name: str, schema: Schema) -> bool:
+        column_list = [
+            {"name":name, **dtype.to_dict()} for name, dtype in schema.columns.items()
+        ]
+
+        new_schema : Dict = {
+            "file_path": f"storage/data/{table_name}.dat",
+            "row_size": schema.size,
+            "columns": column_list
+        }
+        
+        try:
+            data = json.load(open(CATALOG_FILE, "r"))
+            data[table_name] = new_schema
+            with open(CATALOG_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+            return True
+        
+        except FileNotFoundError:
+            print(f"File not found. Creating a new one with 'enrollment' table.")
+            with open(CATALOG_FILE, 'w') as f:
+                json.dump({table_name: new_schema}, f, indent=2)
+            return True
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return False
+        
+    def drop_table(self, table_name: str) -> bool:
+        try:
+            with open(CATALOG_FILE, "r") as f:
+                data = json.load(f)
+
+            if table_name in data:
+                del data[table_name]
+            else:
+                print("Table not found.")
+                return False
+            
+            with open(CATALOG_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+            print(f"Table {table_name} dropped successfully.")
+            return True
+        except FileNotFoundError:
+            print(f"Catalog file {CATALOG_FILE} not found.")
+        except Exception as e:
+            print(f"An error occurred: {e}")
+
+
+    # secara otomatis bakal ngelakuin vacuuming juga
+    def defragment(table: str) -> bool:
+        pass
+
+    def get_stats(table: str = "all") -> Statistic:
         """
             Returns a statistic object
         """
         pass
 
-    # secara otomatis bakal ngelakuin vacuuming juga
-    def defragment(table: str) -> bool:
-        pass
+    # def update_stats

@@ -16,6 +16,7 @@
 - Varchar pake metadata length diawal, kalo lebih panjang dari max, di truncate
 - Deleted pake deleted flag di awal setiap row
 - Metadata di simpan di header, mungkin harus make variable header length
+- Untuk sekarang row size tidak memperhitungkan varchar actual size sm length metadata
 
 ### Statistik
 

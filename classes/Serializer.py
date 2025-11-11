@@ -1,14 +1,15 @@
 import json
 import struct
+from typing import Any, List, Dict
+from classes.globals import CATALOG_FILE
 
-SCHEMA_FILE = "storage/schemas.json"
 from classes.IO import IO
 from classes.globals import ROW_HEADER
 
 class Serializer:
     def __init__(self):
-        self.schema = []
-        self.json = json.load(open(SCHEMA_FILE, "r"))
+        self.schema : Dict = {}
+        self.json : Dict = json.load(open(CATALOG_FILE, "r"))
 
 
 
