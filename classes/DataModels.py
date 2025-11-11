@@ -1,8 +1,38 @@
-from typing import List, Generic, TypeVar, Dict
+from typing import Any, List, Generic, TypeVar, Dict
 from enum import Enum
 from math import ceil
+from classes.Types import DataType, IntType, FloatType, CharType, VarCharType
 
 T = TypeVar("T")
+
+class Schema:
+    def __init__(self, **columns: DataType) -> None:
+        self.columns = columns
+        self.column_order = list(columns.keys())
+        self.column_index = {name: i for i, name in enumerate(self.column_order)}
+
+    def validate_tuple(self, values: Any) -> None:
+        if len(values) != len(self.columns):
+            raise ValueError("Value count doesn't match schema")
+        for dtype, value in zip(self.columns.values(), values):
+            dtype.validate(value)
+
+class Tuple:
+    def __init__(self, schema: Schema, *values: Any) -> None:
+        if len(values) != len(schema.columns):
+            raise ValueError("Value count doesn't match schema")
+        for dtype, value in zip(schema.columns.values(), values):
+            dtype.validate(value)
+        self.schema = schema
+        self.values = list(values)
+
+    def __getitem__(self, column: str) -> Any:
+        index = self.schema.column_index[column]
+        return self.values[index]
+
+    def __repr__(self) -> str:
+        pairs = ", ".join(f"{col}={self.values[i]}" for i, col in enumerate(self.schema.column_order))
+        return f"<Tuple {pairs}>"
 
 class Operation(Enum):
     EQ = "="
@@ -13,20 +43,20 @@ class Operation(Enum):
     LTE = "<="
 
 class Condition:
-    def __init__(self, column: str, operation: Operation, operand: int | str) -> None:
+    def __init__(self, column: str, operation: Operation, operand: int | str | float) -> None:
         self.column: str = column
         self.operation: Operation = operation
-        self.operand: int | str = operand
+        self.operand: int | str | float = operand
 
 class DataRetrieval:
-    def __init__(self, table: List[str], column: List[str], conditions: List[Condition]) -> None:
-        self.table: List[str] = table
+    def __init__(self, table: str, column: List[str], conditions: List[Condition]) -> None:
+        self.table: str = table
         self.column: List[str] = column
         self.conditions: List[Condition] = conditions
 
 class DataWrite(Generic[T]):
-    def __init__(self, table: List[str], column: List[str], conditions: List[Condition], new_value: List[T] | None) -> None:
-        self.table: List[str] = table
+    def __init__(self, table: str, column: List[str], conditions: List[Condition], new_value: List[T] | None) -> None:
+        self.table: str = table
         self.column: List[str] = column
         self.conditions: List[Condition] = conditions
         self.new_value: List[T] | None = new_value
