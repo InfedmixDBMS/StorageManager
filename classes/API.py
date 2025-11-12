@@ -4,18 +4,68 @@ API.py (Working Title)
 The main class that other components will call. Contains the storage engine class as shown in spec
 """
 
-from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic
+from classes.IO import IO
+from classes.Serializer import Serializer
+from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
 from classes.DataModels import Schema
 from classes.globals import CATALOG_FILE
 from typing import Dict
 import json
+import operator
 
 class StorageEngine:
-    def read_block(data_retrieval: DataRetrieval) -> list[list]:
+    operation_funcs : Dict = {
+        Operation.EQ: operator.eq,
+        Operation.NEQ: operator.ne,
+        Operation.GT: operator.gt,
+        Operation.GTE: operator.ge,
+        Operation.LT: operator.lt,
+        Operation.LTE: operator.le,
+    }
+
+    def read_block(self, data_retrieval: DataRetrieval) -> list[list]:
         """
-            Returns rows
+        Returns rows that satisfy given conditions
         """
-        pass
+        table: str = data_retrieval.table
+        io = IO(table)
+        serializer = Serializer()
+        serializer.load_schema(table)
+
+        mappingCol = self.__create_column_mapping(serializer.schema["columns"])
+        res: list[list] = []  
+
+        idx : int = 0
+        #TODO: Implement kalau ada index di colnya
+
+
+        while True:
+            chunk: bytes = io.read(idx)
+            if not chunk:  # EOF
+                break
+
+            data = serializer.deserialize(chunk)
+            for row in data:
+                passed : bool = True
+                for condition in data_retrieval.conditions:
+                    colIdx = mappingCol[condition.column]
+                    func = self.operation_funcs[condition.operation]  
+                    operand = condition.operand
+
+                    if not func(row[colIdx], operand):
+                        passed = False
+                        break  
+
+                if passed:
+                    if data_retrieval.column:  #kalau pengen early projection columnya isi aj
+                        projected_row = [row[mappingCol[col]] for col in data_retrieval.column]
+                        res.append(projected_row)
+                    else:
+                        res.append(row)
+
+            idx += 1
+
+        return res  
     
     def write_block(data_write: DataWrite) -> int:
         """
@@ -91,5 +141,12 @@ class StorageEngine:
             Returns a statistic object
         """
         pass
+
+    #Helper method
+    def __create_column_mapping(self,columns: list[dict]) -> dict[str, int]:
+        mapping = {}
+        for i, col in enumerate(columns):
+            mapping[col["name"]] = i
+        return mapping
 
     # def update_stats
