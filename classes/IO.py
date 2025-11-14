@@ -6,6 +6,7 @@ Ini class paling "low level" yang cuma ngebaca dan menulis ke blok
 """
 
 from classes.globals import BLOCK_SIZE
+import os
 
 class IO:
     def __init__(self, file_path: str):
@@ -22,7 +23,7 @@ class IO:
         """
         with open(self.file_path, "wb") as f:
             f.seek(BLOCK_SIZE * block_idx)
-            f.write(data.ljust(BLOCK_SIZE, b'\x00'))
+            return f.write(data.ljust(BLOCK_SIZE, b'\x00'))
 
     def delete(self, block_idx: int) -> int:
         """
@@ -31,3 +32,10 @@ class IO:
             NOTE: kayaknya ga perlu sih ini, defragment full rewrite
         """
         pass
+
+    def get_last_block_index(self) -> int:
+        """
+        get the index of the last block in file
+        """
+        stat = os.stat(self.file_path)  # From os metadata
+        return (stat.st_size - 1) // BLOCK_SIZE

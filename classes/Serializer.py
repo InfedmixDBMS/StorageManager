@@ -4,7 +4,12 @@ from typing import Any, List, Dict
 from classes.globals import CATALOG_FILE
 
 from classes.IO import IO
-from classes.globals import ROW_HEADER
+from classes.globals import ROW_HEADER, BLOCK_SIZE
+
+class SerializerIncompleteBlockException(Exception):
+    def __init__(self, additional_needed_blocks: int):
+        super().__init__("[StorageManager] Serializer attempted to deserialize incomplete blocks")
+        self.additional_needed_blocks = additional_needed_blocks
 
 class Serializer:
     def __init__(self):
@@ -102,7 +107,9 @@ class Serializer:
         while pointer < len(raw_data):
         # === HEADER PROCESSING
             if pointer + header_size > len(raw_data):
-                break   
+                missing = pointer + header_size - len(raw_data)
+                needed_blocks = (missing + BLOCK_SIZE - 1) // BLOCK_SIZE
+                raise SerializerIncompleteBlockException(needed_blocks)
 
             tuple_header : bytes = raw_data[pointer : pointer+header_size]
             delete_flag, tuple_length = struct.unpack(ROW_HEADER, tuple_header)
@@ -114,7 +121,9 @@ class Serializer:
 
         # === BODY PROCESSING
             if pointer + tuple_length > len(raw_data):
-                break
+                missing = pointer + tuple_length - len(raw_data)
+                needed_blocks = (missing + BLOCK_SIZE - 1) // BLOCK_SIZE
+                raise SerializerIncompleteBlockException(needed_blocks)
 
             tuple_data : bytes = raw_data[pointer : pointer+tuple_length]
             pointer += tuple_length

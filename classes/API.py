@@ -5,11 +5,11 @@ The main class that other components will call. Contains the storage engine clas
 """
 
 from classes.IO import IO
-from classes.Serializer import Serializer
+from classes.Serializer import Serializer, SerializerIncompleteBlockException
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
 from classes.DataModels import Schema
-from classes.globals import CATALOG_FILE
-from typing import Dict
+from classes.globals import CATALOG_FILE, BLOCK_SIZE
+from typing import Dict, Iterator
 import json
 import operator
 
@@ -71,13 +71,125 @@ class StorageEngine:
         """
             Returns number of rows affected
         """
-        pass
-    
+        table: str = data_write.table
+        serializer = Serializer()
+        serializer.load_schema(table)
+
+        inserted_values : list = []
+        inserted_columns : set = data_write.column
+        schema_columns : list = serializer.schema["columns"]
+        for row in data_write.new_value:
+            new_row : list = []
+            i_idx : int = 0
+            sch_idx : int = 0
+            while sch_idx < len(schema_columns):
+                col = schema_columns[sch_idx]
+                if col["name"] == inserted_columns[i_idx]:  # Provided column
+                    new_row.append(row[i_idx])
+                    i_idx += 1
+
+                # Imputation
+                # TODO: column generator, mungkin default value atau inkremen suatu sequence
+                elif col["name"] in ["id"]:  # Auto increment id if insert
+                    # NOTE: Karena update bakal diimplementasi sebagai DELETE -> INSERT, kolom ini gaboleh ga diinsert
+                    new_row.append(0)   # TODO: implement auto increment, perhaps from statistics
+                elif col["type"] == "int":
+                    new_row.append(0)
+                elif col["type"] == "float":
+                    new_row.append(0.0)
+                elif col["type"] == "char" or col["type"] == "varchar":
+                    new_row.append("")
+                sch_idx += 1
+            inserted_values.append(new_row)
+
+        io = IO(serializer.schema["file_path"])
+        last_block_idx : int = 1 + io.get_last_block_index()
+        res : int = 0
+        written_block_length : int = 0
+        block : bytes = b""
+        block_rows : int = 0
+        def flush_block():
+            nonlocal last_block_idx, res, written_block_length, block, block_rows
+            
+            # TODO: Update index here
+            
+            length = io.write(last_block_idx, block)
+            last_block_idx += length // BLOCK_SIZE   # some rows exceed block size
+            res += block_rows
+
+            written_block_length = 0
+            block = b""
+            block_rows = 0
+        # Serialize per row: pack dalam satu blok dulu, lalu ke blok baru kalau melebihi block size
+        row : int = 0
+        while row < len(inserted_values):
+            serialized_data : bytes = serializer.serialize([inserted_values[row]])
+            serialized_data_length : int = len(serialized_data)
+            # TODO: Check for unique/primary key constraint violation here with index
+
+            if written_block_length + serialized_data_length > BLOCK_SIZE:
+                flush_block()
+
+            written_block_length += serialized_data_length
+            block += serialized_data
+            block_rows += 1
+
+            if row == len(data_write.new_value) - 1 and written_block_length > 0:
+                flush_block()
+            row += 1
+
+        return res
+
+
     def delete_block(data_deletion: DataDeletion) -> int:
         """
             Returns number of rows affected
         """
-        pass
+        table: str = data_deletion.table
+        io = IO(table)
+        serializer = Serializer()
+        serializer.load_schema(table)
+
+        res : int = 0
+        
+        # TODO: Algorithm beda kalau ada indeks
+        block_idx_gen = StorageEngine._sequential_search(io)
+        idx = next(block_idx_gen, None)
+        while idx is not None:
+            try:
+                block = io.read(idx)
+            except SerializerIncompleteBlockException as e:
+                for _ in range(e.additional_needed_blocks):
+                    idx = next(block_idx_gen, None)
+                    if idx is None: # Abnormal
+                        return res
+                    block += io.read(idx)
+
+            rows = serializer.deserialize(block)
+            flag_delete = [False] * len(rows)
+
+            for condition in data_deletion.conditions:
+                colIdx : int = serializer.schema["columns"].find(condition.column)
+                func = StorageEngine.operation_funcs[condition.operation]
+                for irow, row in enumerate(rows):
+                    if flag_delete[irow]:
+                        continue
+                    if func(row[colIdx], condition.operand):
+                        flag_delete[irow] = True
+
+            # TODO: Update index
+            
+            new_rows = []
+            for irow, row in enumerate(rows):
+                if not flag_delete[irow]:
+                    new_rows.append(row)
+            res += sum(flag_delete)
+            new_block = serializer.serialize(new_rows)
+            io.write(new_block)
+            idx = next(block_idx_gen, None)
+        
+        return res
+
 
     def set_index(table: str, column:str, index_type: str) -> None:
         pass
@@ -150,3 +262,12 @@ class StorageEngine:
         return mapping
 
     # def update_stats
+
+
+    # --- SCAN ALGORITHMS ---
+    # Algorithm A1: Ful table scan
+    def _sequential_search(file_io: IO) -> Iterator[int]:
+        """
+        Returns an iterator over all the table block indices
+        """
+        yield from range(1 + file_io.get_last_block_index())
