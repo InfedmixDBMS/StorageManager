@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, List, Generic, TypeVar, Dict
 from enum import Enum
 from math import ceil
@@ -88,6 +89,16 @@ class DataDeletion:
     def __init__(self, table: str, conditions: List[Condition]) -> None:
         self.table: str = table
         self.conditions: List[Condition] = conditions
+
+
+class IndexType(Enum):
+    BTREE = "BTREE"
+    HASH = "HASH"
+
+@dataclass
+class IndexPointer:
+    block_idx: int
+    offset: int
 
 class Statistic:
     def __init__(self, n_r: int, l_r: int, f_r: int, V_a_r: Dict[str, int]) -> None:

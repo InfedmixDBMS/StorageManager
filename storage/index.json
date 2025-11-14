@@ -1,0 +1,11 @@
+{
+    "student_pkey": {
+        "file_path": "storage/data/student_pkey.idx",
+        "table": "student",
+        "column": ["id"],
+        "key_type": ["int"],
+        "unique": true,
+        "type": "BTREE",
+        "max_children": 5
+    }
+}

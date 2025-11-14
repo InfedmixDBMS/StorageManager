@@ -1,6 +1,6 @@
 import json
 import struct
-from typing import Any, List, Dict
+from typing import Dict
 from classes.globals import CATALOG_FILE
 
 from classes.IO import IO
@@ -96,7 +96,7 @@ class Serializer:
 
 
 
-    def deserialize(self, raw_data: bytes) -> list[list]:
+    def deserialize(self, raw_data: bytes, byte_offset: list[int] | None = None) -> list[list]:
         if (not self.schema or self.schema == None):
             return b"\xde\xad\xc0\xde"
 
@@ -157,6 +157,8 @@ class Serializer:
                     tuple_pointer += str_length
 
             data.append(tuple)
+            if byte_offset is not None:
+                byte_offset.append(pointer - tuple_length - header_size)
         return data
     
 
