@@ -1,12 +1,15 @@
 import struct
 from typing import Iterator, TypeVar
 from dataclasses import dataclass
-from classes.Indexing import Index
-from classes.DataModels import Condition
+from classes.Indexing import Index, IndexEntry
+from classes.DataModels import Condition, Operation, OPERATION_FUNCS
 from classes.Types import DataType, IntType, FloatType, CharType, VarCharType
 from classes.Indexing import IndexPointer
 
-K = TypeVar("K")  # Index Key type
+K = TypeVar("K", bound=tuple)  # Index Key type
+
+class BTreeMaxKeyExceededException(Exception):
+    pass
 
 @dataclass
 class BTreeNode:
@@ -18,7 +21,7 @@ class BTreeNode:
     keys: list[K]
     pointers: list[int | IndexPointer]
 
-class BTreeIndex(Index):
+class BTreeIndex(Index[K]):
     def __init__(self, file_path: str, table: str, columns: list[str], key_type: tuple[DataType], unique: bool, **kwargs):
         super().__init__(file_path=file_path, table=table, columns=columns, key_type=key_type, unique=unique, **kwargs)
         self.root_block_index: int = 0
@@ -36,13 +39,81 @@ class BTreeIndex(Index):
         # TODO: implement B-Tree delete logic
         pass
 
-    def search(self, key: K) -> Iterator[IndexPointer]:
-        # TODO: implement B-Tree search logic
-        pass
+    def search(self, key: K) -> Iterator[IndexEntry[K]]:
+        if not self.root:
+            self.root = self._read_node(self.root_block_index)
 
-    def search_condition(self, condition: Condition) -> Iterator[IndexPointer]:
-        # TODO: implement B-Tree search condition logic
-        pass
+        node = self.root
+
+        # -------- Traverse internal nodes --------
+        while not node.is_leaf:
+            i = 0
+            while i < node.num_keys and key >= node.keys[i]:
+                i += 1
+            node = self._read_node(node.pointers[i])
+
+        # -------- Search in leaf --------
+        leaf = node
+        idx = 0
+        while True:
+            # Scan current leaf
+            while idx < leaf.num_keys:
+                k = leaf.keys[idx]
+                if k > key:
+                    return
+                if k == key:
+                    yield IndexEntry(key=k, pointer=leaf.pointers[idx])  # type: ignore
+
+                idx += 1
+
+            # Leaf sebelahnya jika ada
+            if leaf.next_leaf == 0:
+                return
+            next_leaf = self._read_node(leaf.next_leaf)
+
+            if next_leaf.keys[0] > key:
+                return
+
+            leaf = next_leaf
+            idx = 0
+
+    def search_condition(self, condition: Condition) -> Iterator[IndexEntry[K]]:
+        col_idx = self.columns.index(condition.column)
+
+        if col_idx != 0 or condition.operation == Operation.NEQ:
+            # Ekivalen dengan full scan search
+            for entry in self._full_scan():
+                if OPERATION_FUNCS[condition.operation](entry.key[col_idx], condition.operand):
+                    yield entry
+            return
+
+        op = condition.operation
+        operand = condition.operand
+
+        # EQ ----------------------------------------------------------------------
+        if op == Operation.EQ:
+            for entry in self._search_then_scan_to_end((operand,)):
+                if entry.key[0] != operand:
+                    break
+                yield entry
+            return
+
+        # GT / GTE ----------------------------------------------------------------
+        if op in (Operation.GT, Operation.GTE):
+            for entry in self._search_then_scan_to_end((operand,)):
+                if OPERATION_FUNCS[op](entry.key[0], operand):
+                    yield entry
+            return
+
+        # LT / LTE ----------------------------------------------------------------
+        if op in (Operation.LT, Operation.LTE):
+            for entry in self._full_scan():   # sorted leaf-chain scan
+                if OPERATION_FUNCS[op](entry.key[0], operand):
+                    yield entry
+                else:
+                    break
+            return
+
 
     # --- METADATA ---
     def _initialize_index_file(self):
@@ -253,3 +324,68 @@ class BTreeIndex(Index):
             keys=keys,
             pointers=pointers
         )
+
+    # --- Traversal algorithms ---
+    def _full_scan(self) -> Iterator[IndexEntry[K]]:
+        """
+        Scan seluruh entry index dari awal sampai akhir.
+        """
+        if not self.root:
+            self.root = self._read_node(self.root_block_index)
+
+        node = self.root
+
+        # -------- Traverse internal nodes --------
+        # Traverse leaf terkiri paling bawah
+        while not node.is_leaf:
+            node = self._read_node(node.pointers[0])
+        # -------- Scan leaf nodes --------
+        leaf = node
+        idx = 0
+        while True:
+            while idx < leaf.num_keys:
+                yield IndexEntry(key=leaf.keys[idx], pointer=leaf.pointers[idx])
+                idx += 1
+
+            # Traverse leaf sebelahnya jika ada
+            if leaf.next_leaf == 0:
+                break
+            leaf = self._read_node(leaf.next_leaf)
+            idx = 0
+    
+    def _search_then_scan_to_end(self, key: tuple) -> Iterator[IndexEntry[K]]:
+        """
+        Scan semua entry yang komponen pertama keynya lebih besar dari key yang diberikan.
+        Jika komposit, hanya komponen pertama yang dibandingkan. Komponen kedua diabaikan.
+        Tidak dapat melakukan searching ke komponen selain komponen pertama.
+        """
+        
+        if not self.root:
+            self.root = self._read_node(self.root_block_index)
+
+        key_part = key[0]
+        node = self.root
+
+        # -------- Traverse internal nodes --------
+        while not node.is_leaf:
+            i = 0
+            while i < node.num_keys and key_part > node.keys[i][0]:
+                i += 1
+            node = self._read_node(node.pointers[i])
+
+        # -------- Scan leaf nodes --------
+        leaf = node
+        idx = 0
+        while idx < leaf.num_keys and leaf.keys[idx][0] < key_part:
+            idx += 1
+
+        while True:
+            while idx < leaf.num_keys:
+                yield IndexEntry(key=leaf.keys[idx], pointer=leaf.pointers[idx])
+                idx += 1
+
+            # Traverse leaf sebelahnya jika ada
+            if leaf.next_leaf == 0:
+                return
+            leaf = self._read_node(leaf.next_leaf)
+            idx = 0

@@ -22,6 +22,11 @@ class IndexPointer:
     block_idx: int
     offset: int
 
+@dataclass
+class IndexEntry(Generic[K]):
+    key: K
+    pointer: IndexPointer
+
 class UniqueIndexViolationException(Exception):
     def __init__(self, message: str):
         super().__init__(message)
@@ -53,11 +58,11 @@ class Index(ABC, Generic[K]):
         pass
 
     @abstractmethod
-    def search(self, key: K) -> Iterator[IndexPointer]:
+    def search(self, key: K) -> Iterator[IndexEntry[K]]:
         pass
 
     @abstractmethod
-    def search_condition(self, condition: Condition) -> Iterator[IndexPointer]:
+    def search_condition(self, condition: Condition) -> Iterator[IndexEntry[K]]:
         pass
 
     @abstractmethod

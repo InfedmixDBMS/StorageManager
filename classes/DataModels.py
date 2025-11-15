@@ -1,3 +1,4 @@
+from ast import operator
 from typing import Any, List, Generic, TypeVar, Dict
 from enum import Enum
 from math import ceil
@@ -96,3 +97,12 @@ class Statistic:
         self.f_r: int = f_r
         self.b_r: int = ceil(n_r / f_r)
         self.V_a_r: Dict[str, int] = V_a_r
+
+OPERATION_FUNCS : Dict = {
+    Operation.EQ: operator.eq,
+    Operation.NEQ: operator.ne,
+    Operation.GT: operator.gt,
+    Operation.GTE: operator.ge,
+    Operation.LT: operator.lt,
+    Operation.LTE: operator.le,
+}
