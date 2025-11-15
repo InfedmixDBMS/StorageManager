@@ -1,26 +1,48 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 import os
-from typing import Generic, TypeVar
+from typing import Generic, Iterator, TypeVar
+from enum import Enum
 from classes.IO import IO
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
-from classes.DataModels import Condition, IndexPointer, IndexType
+from classes.DataModels import Condition
+from classes.Types import CharType, DataType, FloatType, IntType, VarCharType
 from classes.globals import INDEX_META_FILE, DATA_STORE_PATH
+from classes.BTreeIndex import BTreeIndex
 import json
 
-K = TypeVar("K")  # Index Key type
+K = TypeVar("K", bound=tuple)  # Index Key type
 
+class IndexType(Enum):
+    BTREE = "BTREE"
+    HASH = "HASH"
+
+@dataclass
+class IndexPointer:
+    block_idx: int
+    offset: int
 
 class UniqueIndexViolationException(Exception):
     def __init__(self, message: str):
         super().__init__(message)
 
 class Index(ABC, Generic[K]):
-    def __init__(self, file_path: str, table: str, columns: list[str], key_type: type[K], unique: bool):
-        self.table = table
-        self.columns = columns
-        self.key_type = key_type
-        self.unique = unique
-        self.io = IO(file_path)
+    def __init__(self, file_path: str, table: str, columns: list[str], key_type: tuple[DataType], unique: bool):
+        self.table: str = table
+        self.columns: list[str] = columns
+        if isinstance(key_type, tuple):
+            self.key_types: tuple[DataType] = key_type
+        else:
+            self.key_types: tuple[DataType] = (key_type,)
+        self.unique: bool = unique
+        self.io: IO = IO(file_path)
+
+        if len(self.key_types) == 0:
+            raise ValueError("[StorageManager] Key types must be specified for BTreeIndex initialization")
+        if len(self.key_types) != len(self.columns):
+            raise ValueError("[StorageManager] Key types count must match columns count for BTreeIndex initialization")
+        if len(self.key_types) > 1000:
+            raise ValueError("[StorageManager] Key columns count exceeds maximum limit of 1000")
 
     @abstractmethod
     def insert(self, key: K, block_index: int, offset: int):
@@ -31,11 +53,11 @@ class Index(ABC, Generic[K]):
         pass
 
     @abstractmethod
-    def search(self, key: K) -> list[IndexPointer]:
+    def search(self, key: K) -> Iterator[IndexPointer]:
         pass
 
     @abstractmethod
-    def search_condition(self, condition: Condition) -> list[IndexPointer]:
+    def search_condition(self, condition: Condition) -> Iterator[IndexPointer]:
         pass
 
     @abstractmethod
@@ -61,7 +83,7 @@ class Index(ABC, Generic[K]):
 
         block_idx : int = 0
         last_idx : int = data_io.get_last_block_index()
-        while block_idx < last_idx:
+        while block_idx <= last_idx:
             block_data: bytes = b""
             index_block: int = block_idx
             offsets: list[int] = []
@@ -127,20 +149,44 @@ class IndexController:
             raise ValueError(f"Index {index_name} sudah ada.")
 
         # Create index file
-        file_path = os.path.join(DATA_STORE_PATH, f"{index_name}.idx")
-        open(file_path, 'wb').close()
+        try:
+            file_path = os.path.join(DATA_STORE_PATH, f"{index_name}.idx")
+            open(file_path, 'wb').close()
+        except Exception as e:
+            print(f"An error occurred while creating index file: {e}")
+            raise e
 
-        # TODO: Create index object
+        
+        # Create index object
+        serializer = Serializer()
+        key_type: list[DataType] = []
+        serializer.load_schema(table)
+        for col in serializer.schema["columns"]:
+            if col["name"] == column:   # Support key satu kolom dulu
+                if col["type"] == "int":
+                    key_type.append(IntType()),
+                elif col["type"] == "float":
+                    key_type.append(FloatType()),
+                elif col["type"] == "char":
+                    key_type.append(CharType(col["length"])),
+                elif col["type"] == "varchar":
+                    key_type.append(VarCharType(col["length"])),
         if index_type == IndexType.BTREE:
-            index_object = None
+            index_object = BTreeIndex(file_path=file_path,
+                                      table=table,
+                                      columns=[column],
+                                      key_type=tuple(key_type),
+                                      unique=is_unique)
         elif index_type == IndexType.HASH:
             index_object = None
+            # TODO: Create hash index
+            raise NotImplementedError("Hash index belum diimplementasi")
         else:
             raise ValueError(f"Invalid index type {index_type}")
         self.index_map[index_name] = index_object
+        index_object.build_index(serializer)
         
         # Update metadata
-        
         new_index_schema = {
             "file_path": file_path,
             "table": table,
@@ -166,12 +212,12 @@ class IndexController:
         """
         For each index in the schema, create the appropriate Index object.
         """
-        for _, meta in self.index_schema.items():
+        for index_name, meta in self.index_schema.items():
             type = meta["type"].upper()
 
             # TODO: populate self.index_map
             if type == IndexType.BTREE:
-                pass
+                self.index_map[index_name] = BTreeIndex(**meta)
             elif type == IndexType.HASH:
                 pass
             else:
