@@ -21,7 +21,7 @@ class IO:
         """
         data - serialized data
         """
-        with open(self.file_path, "wb") as f:
+        with open(self.file_path, "r+b") as f:
             f.seek(BLOCK_SIZE * block_idx)
             return f.write(data.ljust(BLOCK_SIZE, b'\x00'))
 
