@@ -1,10 +1,8 @@
 import json
 import struct
 from typing import Dict
-from classes.globals import CATALOG_FILE
-
+from classes.globals import CATALOG_FILE, ROW_HEADER, BLOCK_SIZE
 from classes.IO import IO
-from classes.globals import ROW_HEADER, BLOCK_SIZE
 
 class SerializerIncompleteBlockException(Exception):
     def __init__(self, additional_needed_blocks: int):

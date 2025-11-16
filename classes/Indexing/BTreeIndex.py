@@ -1,14 +1,16 @@
 import struct
 from typing import Iterator, TypeVar
 from dataclasses import dataclass
-from classes.Indexing import Index, IndexEntry
 from classes.DataModels import Condition, Operation, OPERATION_FUNCS
 from classes.Types import DataType, IntType, FloatType, CharType, VarCharType
-from classes.Indexing import IndexPointer
+from classes.globals import BLOCK_SIZE
+from classes.Indexing.Index import Index, IndexPointer, IndexEntry, UniqueIndexViolationException
+
+ROOT_BLOCK_INDEX = 1  # blok index untuk root node B-Tree
 
 K = TypeVar("K", bound=tuple)  # Index Key type
 
-class BTreeMaxKeyExceededException(Exception):
+class BTreeInsertedMaxKeyException(Exception):
     pass
 
 @dataclass
@@ -26,16 +28,95 @@ class BTreeIndex(Index[K]):
         super().__init__(file_path=file_path, table=table, columns=columns, key_type=key_type, unique=unique, **kwargs)
         self.root_block_index: int = 0
         self.root: BTreeNode | None = None  # Store in memory
-        
+    
+    def load_metadata(self):
         self._read_index_metadata()
         self.root = self._read_node(self.root_block_index)
 
     # --- INTERFACE ---
-    def insert(self, key: K, block_index: int, offset: int):
-        # TODO: implement B-Tree insert logic
-        pass
+    def insert(self, key: K, pointer: IndexPointer):
+        # if not self.root:
+        #     self.root = self._read_node(self.root_block_index)
 
-    def delete(self, key: K):
+        # node: BTreeNode = self.root
+        # idx_stack: list[int] = [self.root_block_index]
+
+        # # -------- Traverse internal nodes --------
+        # while not node.is_leaf:
+        #     i = 0
+        #     while i < node.num_keys and key >= node.keys[i]:
+        #         i += 1
+        #     idx_stack.append(node.pointers[i])
+        #     node = self._read_node(node.pointers[i])
+        
+        # # -------- Insert in leaf --------
+        # def insert_key(node: BTreeIndex, entry: IndexEntry[K]):
+        #     insert_pos = 0
+        #     while insert_pos < node.num_keys and node.keys[insert_pos] < entry.key:
+        #         insert_pos += 1
+        #     node.keys.insert(insert_pos, entry.key)
+        #     node.pointers.insert(insert_pos, entry.pointer)
+
+        # # Cek unique constraint
+        # if self.unique:
+        #     for i in range(node.num_keys):
+        #         if node.keys[i] == key:
+        #             raise UniqueIndexViolationException("[BTreeIndex] Unique index violation on key {}".format(key))
+        
+        # # Insert key dan pointer
+        # insert_key(node, IndexEntry(key=key, pointer=pointer))
+        # need_write: bool = True
+        # while need_write:
+        #     try:
+        #         self._write_through_node(idx_stack[-1], node)
+        #         need_write = False
+        #     except BTreeInsertedMaxKeyException:
+        #         left, right, middle_entry = self._split_node(node)
+        #         left_block_index: int = -1
+        #         right_block_index: int = -1
+
+        #         if len(idx_stack) == 1:
+        #             left_block_index = self.io.get_last_block_index() + 1
+        #             right_block_index = left_block_index + 1
+
+        #             # Split root
+        #             new_root = BTreeNode(
+        #                 next_leaf=0,
+        #                 parent_node=0,
+        #                 num_keys=1,
+        #                 is_leaf=False,
+        #                 is_root=True,
+        #                 keys=[],
+        #                 pointers=[]
+        #             )
+        #             left.parent_node = self.root_block_index
+        #             right.parent_node = self.root_block_index
+        #             new_root.keys = [middle_entry.key]
+        #             new_root.pointers = [left_block_index, right_block_index]
+
+        #             self._write_through_node(self.root_block_index, new_root)
+        #             self.root = new_root
+        #             need_write = False
+        #         else:
+        #             left_block_index = idx_stack.pop()
+        #             right_block_index = self.io.get_last_block_index() + 1
+
+        #             # Pop parent node
+        #             parent_block_index = idx_stack[-1]
+        #             parent_node = self._read_node(parent_block_index)
+
+        #             insert_key(parent_node, middle_entry)
+        #             left.parent_node = parent_block_index
+        #             right.parent_node = parent_block_index
+        #             node = parent_node
+        #             need_write = True
+        #         # Write left and right nodes
+        #         self._write_through_node(left_block_index, left)
+        #         self._write_through_node(right_block_index, right)
+        
+        return
+
+    def delete(self, key: K, specific_entry_pointer: IndexPointer | None = None) -> int:
         # TODO: implement B-Tree delete logic
         pass
 
@@ -43,7 +124,7 @@ class BTreeIndex(Index[K]):
         if not self.root:
             self.root = self._read_node(self.root_block_index)
 
-        node = self.root
+        node: BTreeNode = self.root
 
         # -------- Traverse internal nodes --------
         while not node.is_leaf:
@@ -69,12 +150,7 @@ class BTreeIndex(Index[K]):
             # Leaf sebelahnya jika ada
             if leaf.next_leaf == 0:
                 return
-            next_leaf = self._read_node(leaf.next_leaf)
-
-            if next_leaf.keys[0] > key:
-                return
-
-            leaf = next_leaf
+            leaf = self._read_node(leaf.next_leaf)
             idx = 0
 
     def search_condition(self, condition: Condition) -> Iterator[IndexEntry[K]]:
@@ -128,7 +204,7 @@ class BTreeIndex(Index[K]):
                 - 'v' : varchar
         """
         # --- METADATA ---
-        self.root_block_index = 1  # root node di blok 1
+        self.root_block_index = ROOT_BLOCK_INDEX
         self._write_index_metadata()
 
         # --- ROOT NODE ---
@@ -141,7 +217,7 @@ class BTreeIndex(Index[K]):
             keys=[],
             pointers=[]
         )
-        self._write_node(1, root_node)
+        self._write_through_node(self.root_block_index, root_node)
     
     def _write_index_metadata(self):
         """
@@ -153,7 +229,7 @@ class BTreeIndex(Index[K]):
         # Jumlah kolom dalam key
         metadata.append(struct.pack("<H", len(self.key_types)))
         # Key types
-        for typ in self.key_types:  # Update this line
+        for typ in self.key_types:
             if isinstance(typ, IntType):
                 metadata.append(struct.pack("<B", ord('i')))
             elif isinstance(typ, FloatType):
@@ -162,6 +238,7 @@ class BTreeIndex(Index[K]):
                 metadata.append(struct.pack("<B", ord('c')))
             elif isinstance(typ, VarCharType):
                 metadata.append(struct.pack("<B", ord('v')))
+
         self.io.write(0, b"".join(metadata))
 
     def _read_index_metadata(self):
@@ -262,8 +339,12 @@ class BTreeIndex(Index[K]):
                 # Internal pointer
                 serialized_node.append(struct.pack("<I", pointer))
 
-        self.io.write(block_index, b"".join(serialized_node))
-    
+        block = b"".join(serialized_node)
+        if len(block) > BLOCK_SIZE:
+            raise BTreeInsertedMaxKeyException("[BTreeIndex] Index metadata exceeds block size")
+
+        self.io.write(block_index, block)
+
     def _read_node(self, block_index: int) -> BTreeNode:
         """
         Baca dan deserialize node dari blok index tertentu.
@@ -324,6 +405,41 @@ class BTreeIndex(Index[K]):
             keys=keys,
             pointers=pointers
         )
+    
+    # --- NODE OPERATIONS ---
+    def _split_node(self, node: BTreeNode) -> tuple[BTreeNode, BTreeNode, IndexEntry[K]]:
+        """
+        Split node menjadi dua node baru.
+        Mengembalikan tuple (left_node, right_node, middle_entry).
+        """
+        mid_index = node.num_keys // 2
+        middle_entry = IndexEntry(key=node.keys[mid_index], pointer=node.pointers[mid_index])
+
+        left_node = BTreeNode(
+            next_leaf=0,
+            parent_node=node.parent_node,
+            num_keys=mid_index,
+            is_leaf=node.is_leaf,
+            is_root=False,
+            keys=node.keys[:mid_index],
+            pointers=node.pointers[:mid_index + (1 if not node.is_leaf else 0)]
+        )
+
+        right_node = BTreeNode(
+            next_leaf=0,
+            parent_node=node.parent_node,
+            num_keys=node.num_keys - mid_index - 1,
+            is_leaf=node.is_leaf,
+            is_root=False,
+            keys=node.keys[mid_index + 1:],
+            pointers=node.pointers[mid_index + 1 + (1 if not node.is_leaf else 0):]
+        )
+
+        if node.is_leaf:
+            left_node.next_leaf = self.io.get_last_block_index() + 2
+            right_node.next_leaf = node.next_leaf
+
+        return left_node, right_node, middle_entry
 
     # --- Traversal algorithms ---
     def _full_scan(self) -> Iterator[IndexEntry[K]]:
