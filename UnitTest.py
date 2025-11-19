@@ -49,6 +49,32 @@ def test_drop_table():
     else:
         print("GAGAL.")
 
+def test_update_stats():
+    s = Serializer()
+    s.load_schema("student")
+    storageIO = IO("student")
+    
+    dummy = [
+        [0 ,101, "Alice Wonderland", 3.8],
+        [1 ,102, "Bob Builder", 3.8],
+        [2 ,103, "Charlie Chaplin", 3.9],
+        [3 ,104, "David Beckham", 3.2],
+        [4 ,105, "Eva Green", 4.0]
+    ]
+
+    data = s.serialize(dummy)
+    print(data)
+
+    storageIO.write(0, data)
+
+    StorageEngine().update_stats("student")
+
+    stat : Statistic = StorageEngine().get_stats("student")
+    print(stat)
+
 if __name__ == "__main__":
-    # test_create_table()
-    test_drop_table()
+    # run API tests
+    # test_write_block_api()
+    # test_read_block_api()
+    # test_delete_block_api()
+    test_update_stats( )
