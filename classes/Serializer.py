@@ -23,6 +23,10 @@ class Serializer:
             Loads a schema from json file into the schema attribute based on table name
         """
         self.schema = self.json[table_name]
+        special_col = {"name": "__special_row_id", "type": "rowid", "length": 2}
+        if not any(col.get("name") == "__special_row_id" for col in self.schema.get("columns", [])):
+            # Prepend
+            self.schema["columns"] = [special_col] + self.schema.get("columns", [])
         print(self.schema)
 
 
@@ -55,6 +59,11 @@ class Serializer:
             for column, value in zip(self.schema['columns'], tuple):
                 packed_value : bytes = b''
                 
+                if column.get('type') == 'rowid':
+                    packed_value = struct.pack('<H', value)
+                    prepared_values.append(packed_value)
+                    continue
+
                 if column['type'] == 'int':
                     packed_value = struct.pack('<i', value)
                     prepared_values.append(packed_value)
@@ -70,7 +79,7 @@ class Serializer:
                     if len(packed_value) > column_length:
                         packed_value = packed_value[:column_length]
                     else:
-                        packed_value = packed_value.ljust(column_length, '\x00')
+                        packed_value = packed_value.ljust(column_length, b'\x00')
                     
                     prepared_values.append(packed_value)
                 
@@ -131,6 +140,11 @@ class Serializer:
             tuple_pointer : int = 0
             tuple : list = []
             for col in self.schema['columns']:
+                if col.get('type') == 'rowid':
+                    value : int = struct.unpack('<H', tuple_data[tuple_pointer : tuple_pointer + 2])[0]
+                    tuple.append(value)
+                    tuple_pointer += 2
+                    continue
                 if col['type'] == 'int':
                     value : int = struct.unpack('<i', tuple_data[tuple_pointer : tuple_pointer + 4])[0]
                     tuple.append(value)

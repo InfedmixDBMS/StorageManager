@@ -7,6 +7,7 @@
 - Block size 1024 bytes
 - Buat unspanned tuple yang cross block di handle
 - Write defaut ke blok terakhir, ga perlu urusin freespace, defrag berkala manual
+- __special_row_id di handle di application logic (insert, update)
 
 ### Connection to other components
 - Kita filtering --- query processor yang projection
@@ -38,3 +39,12 @@
 ## List Classes
 - Serializer
 - IO
+
+## Visualization
+### Row Format (example)
+[ ROW HEADER ] [                         TUPLE DATA (BODY)                        ]
++------------+ +--------------------+---------------+-----------------+-----------+
+| Flag | Len | |  __special_row_id  |   COL INT     |   COL Varchar   | COL FLOAT |
++------+-----+ +--------------------+---------------+-----------------+-----------+
+| 1B   | 2B  | |       2 Bytes      |    4 Bytes    |     N Bytes     |  4 Bytes  |
++------+-----+ +--------------------+---------------+-----------------+-----------+
