@@ -4,11 +4,12 @@ API.py (Working Title)
 The main class that other components will call. Contains the storage engine class as shown in spec
 """
 
+from scipy import stats
 from classes.IO import IO
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
 from classes.DataModels import Schema
-from classes.globals import CATALOG_FILE, BLOCK_SIZE
+from classes.globals import CATALOG_FILE, BLOCK_SIZE, STATS_BASE_PATH
 from typing import Dict, Iterator
 import json
 import operator
@@ -194,8 +195,10 @@ class StorageEngine:
     def set_index(table: str, column:str, index_type: str) -> None:
         pass
 
+
     # TODO: create sama drop masih soft delete (fileny gak di delete)
-    def create_table(self, table_name: str, schema: Schema) -> bool:
+    @staticmethod
+    def create_table(table_name: str, schema: Schema) -> bool:
         column_list = [
             {"name":name, **dtype.to_dict()} for name, dtype in schema.columns.items()
         ]
@@ -223,7 +226,8 @@ class StorageEngine:
             print(f"An error occurred: {e}")
             return False
         
-    def drop_table(self, table_name: str) -> bool:
+    @staticmethod
+    def drop_table(table_name: str) -> bool:
         try:
             with open(CATALOG_FILE, "r") as f:
                 data = json.load(f)
@@ -248,11 +252,87 @@ class StorageEngine:
     def defragment(table: str) -> bool:
         pass
 
-    def get_stats(table: str = "all") -> Statistic:
+    # karena return value nya class Statistic, ini return satu table aja, kalo mau multiple table handle di caller aj
+    @staticmethod
+    def get_stats(table: str) -> Statistic:
+        try:
+            with open(STATS_BASE_PATH + table + "_stats.json", "r") as f:
+                stats_data = json.load(f)
+                statistic = Statistic(
+                    n_r=stats_data["n_r"],
+                    b_r=stats_data["b_r"],
+                    f_r=stats_data["f_r"],
+                    l_r=stats_data["l_r"],
+                    V_a_r=stats_data["V_a_r"]
+                )
+                return statistic
+
+        except Exception as e:
+            print("Unexcpected error in get_stats(): ", e)
+
+    @staticmethod
+    def update_stats(table: str = "all") -> None:
         """
-            Returns a statistic object
+            Updates the statistics file for the given table
+            This function recalculates the statistics from the data file
         """
-        pass
+
+        if table == "all":
+            catalog = json.load(open(CATALOG_FILE, "r"))
+            for table in catalog.keys():
+                print("LOG: updating stats for table", table)
+                StorageEngine.update_stats(table)
+            return
+
+        serializer = Serializer()
+        serializer.load_schema(table)
+        io = IO(table)
+
+        block_iterator = StorageEngine._sequential_search(io)
+        nr : int = 0 # number of tuples
+        br : int = io.get_last_block_index() + 1 # number of blocks containing tuples
+        unique_values : dict[str, set] = [set() for column in serializer.schema["columns"] if column["name"] != "__s"]
+        v_a_r : dict[str, int] = {}
+
+        # size of tuple ambil average tuple size
+        total_row_size : int = 0
+
+        while True:
+            idx = next(block_iterator, None)
+            if idx is None:
+                break
+            block = io.read(idx)
+            rows = serializer.deserialize(block)
+            for row in rows:
+                total_row_size += serializer.get_row_size(row)
+                for col, value in enumerate(row):
+                    unique_values[col].add(value)
+                nr += 1
+
+
+        fr : int = nr // br if br > 0 else 0   # blocking factor
+        lr : int = total_row_size // nr if nr > 0 else 0 # avg size of tuple
+        for i, col in enumerate(serializer.schema["columns"]):
+            column_name = col["name"]
+            if column_name != "__special_row_id":
+                v_a_r[column_name] = len(unique_values[i])
+
+        stats =  {
+            "n_r": nr,
+            "b_r": br,
+            "f_r": fr,
+            "l_r": lr,
+            "V_a_r": v_a_r
+        }
+
+        file_path = STATS_BASE_PATH + table + "_stats.json"
+        try:
+            with open(file_path, "w") as f:
+                json.dump(stats, f, indent=2)
+            print(f"LOG: Statistics for table {table} updated successfully.")
+        except Exception as e:
+            print("Unexpected error")
+
 
     #Helper method
     def __create_column_mapping(self,columns: list[dict]) -> dict[str, int]:
@@ -266,6 +346,7 @@ class StorageEngine:
 
     # --- SCAN ALGORITHMS ---
     # Algorithm A1: Ful table scan
+    @staticmethod
     def _sequential_search(file_io: IO) -> Iterator[int]:
         """
         Returns an iterator over all the table block indices

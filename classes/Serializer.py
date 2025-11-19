@@ -27,7 +27,7 @@ class Serializer:
         if not any(col.get("name") == "__special_row_id" for col in self.schema.get("columns", [])):
             # Prepend
             self.schema["columns"] = [special_col] + self.schema.get("columns", [])
-        print(self.schema)
+        # print(self.schema)
 
 
 
@@ -173,6 +173,20 @@ class Serializer:
             data.append(tuple)
         return data
     
+    def get_row_size(self, row: list) -> int:
+        size : int = struct.calcsize(ROW_HEADER)
+        for col, value in zip(self.schema['columns'], row):
+            if col['type'] == 'rowid':
+                size += 2
+            elif col['type'] == 'int':
+                size += 4
+            elif col['type'] == 'float':
+                size += 4
+            elif col['type'] == 'char':
+                size += col['length']
+            elif col['type'] == 'varchar':
+                size += 2 + len(str(value).encode('utf-8'))
+        return size
 
 if __name__ == "__main__":
     s = Serializer()

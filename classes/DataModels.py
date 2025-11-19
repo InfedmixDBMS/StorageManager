@@ -90,9 +90,18 @@ class DataDeletion:
         self.conditions: List[Condition] = conditions
 
 class Statistic:
-    def __init__(self, n_r: int, l_r: int, f_r: int, V_a_r: Dict[str, int]) -> None:
+    def __init__(self, n_r: int, b_r: int, l_r: int, f_r: int, V_a_r: Dict[str, int]) -> None:
         self.n_r: int = n_r
+        self.b_r: int = b_r
         self.l_r: int = l_r
         self.f_r: int = f_r
-        self.b_r: int = ceil(n_r / f_r)
         self.V_a_r: Dict[str, int] = V_a_r
+
+    def __str__(self) -> str:
+        return (
+            f"Statistic(n_r={self.n_r}, b_r={self.b_r}, f_r={self.f_r}, "
+            f"l_r={self.l_r}, V_a_r={self.V_a_r})"
+        )
+
+    def __repr__(self) -> str:
+        return self.__str__()

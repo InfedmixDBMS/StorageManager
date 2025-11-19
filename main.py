@@ -7,7 +7,7 @@ from classes.Serializer import Serializer
 if __name__ == "__main__":
     s = Serializer()
     s.load_schema("student")
-    storageIO = IO(s.schema["file_path"])
+    storageIO = IO("student")
     
     dummy = [
         [0 ,101, "Alice Wonderland", 3.8],

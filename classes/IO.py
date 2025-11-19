@@ -9,8 +9,8 @@ from classes.globals import BLOCK_SIZE
 import os
 
 class IO:
-    def __init__(self, file_path: str):
-        self.file_path = file_path
+    def __init__(self, table_name: str):
+        self.file_path = f"storage/data/{table_name}.dat"
 
     def read(self, block_idx: int) -> bytes:
         with open(self.file_path, "rb") as f:
