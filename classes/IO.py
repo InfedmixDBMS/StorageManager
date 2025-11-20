@@ -21,7 +21,8 @@ class IO:
         """
         data - serialized data
         """
-        with open(self.file_path, "wb") as f:
+        mode = "r+b" if os.path.exists(self.file_path) else "wb"
+        with open(self.file_path, mode) as f:
             f.seek(BLOCK_SIZE * block_idx)
             return f.write(data.ljust(BLOCK_SIZE, b'\x00'))
 

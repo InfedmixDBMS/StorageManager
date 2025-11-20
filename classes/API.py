@@ -85,7 +85,7 @@ class StorageEngine:
             sch_idx : int = 0
             while sch_idx < len(schema_columns):
                 col = schema_columns[sch_idx]
-                if col["name"] == inserted_columns[i_idx]:  # Provided column
+                if i_idx < len(inserted_columns) and col["name"] == inserted_columns[i_idx]:  # Provided column
                     new_row.append(row[i_idx])
                     i_idx += 1
 
@@ -103,7 +103,7 @@ class StorageEngine:
                 sch_idx += 1
             inserted_values.append(new_row)
 
-        io = IO(serializer.schema["file_path"])
+        io = IO(table)
         last_block_idx : int = 1 + io.get_last_block_index()
         res : int = 0
         written_block_length : int = 0
