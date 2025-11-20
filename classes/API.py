@@ -6,8 +6,9 @@ The main class that other components will call. Contains the storage engine clas
 
 from scipy import stats
 from classes.IO import IO
-# from QueryProcessor.models.rows import Rows
+from QueryProcessor.models.rows import Rows
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
+from typing import Any
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
 from classes.DataModels import Schema
 from classes.globals import CATALOG_FILE, BLOCK_SIZE, STATS_BASE_PATH
@@ -32,24 +33,37 @@ class StorageEngine:
         """
         Returns Rows object containing rows that satisfy conditions
         """
-        table: str = data_retrieval.table
+        table = data_retrieval.table
         io = IO(table)
         serializer = Serializer()
         serializer.load_schema(table)
 
         mappingCol = self.__create_column_mapping(serializer.schema["columns"])
         all_columns = [col["name"] for col in serializer.schema["columns"]]
+        res: list[list[Any]] = []
 
-        res: list[list] = []
+        block_idx_gen = StorageEngine._sequential_search(io)
 
-        idx: int = 0
+        for idx in block_idx_gen:
+            chunk = io.read(idx)
 
-        while True:
-            chunk: bytes = io.read(idx)
-            if not chunk:  # EOF
-                break
+            if not chunk:
+                continue
 
-            data = serializer.deserialize(chunk)
+            try:
+                data = serializer.deserialize(chunk)
+
+            except SerializerIncompleteBlockException as e:
+                full_chunk = bytearray(chunk)
+
+                for _ in range(e.additional_needed_blocks):
+                    next_idx = next(block_idx_gen, None)
+                    if next_idx is None:
+                        break
+                    full_chunk.extend(io.read(next_idx))
+
+                data = serializer.deserialize(full_chunk)
+
             for row in data:
                 passed = True
                 for condition in data_retrieval.conditions:
@@ -62,18 +76,18 @@ class StorageEngine:
                         break
 
                 if passed:
-                    if data_retrieval.column:  
+                    if data_retrieval.column:
                         projected_row = [row[mappingCol[col]] for col in data_retrieval.column]
                         res.append(projected_row)
                     else:
                         res.append(row)
 
-            idx += 1
+        return Rows(
+            columns=data_retrieval.column if data_retrieval.column else all_columns,
+            data=res
+        )
 
-        if data_retrieval.column:
-            return Rows(columns=data_retrieval.column, data=res)
-        else:
-            return Rows(columns=all_columns, data=res)
+
 
     
     def write_block(data_write: DataWrite) -> int:
