@@ -114,6 +114,9 @@ class Serializer:
         header_size : int = struct.calcsize(ROW_HEADER)
 
         while pointer < len(raw_data):
+            if raw_data[pointer] == 0: 
+                break
+
         # === HEADER PROCESSING
             if pointer + header_size > len(raw_data):
                 missing = pointer + header_size - len(raw_data)
@@ -173,6 +176,8 @@ class Serializer:
             data.append(tuple)
         return data
     
+    # TODO: ini mungkin nanti diganti pake ukuran yang ada di HEADER, jadi ga perlu ngitung2 lagi.
+    # Cata kerjanya mungking di class Tuple ditambahin atribut baru
     def get_row_size(self, row: list) -> int:
         size : int = struct.calcsize(ROW_HEADER)
         for col, value in zip(self.schema['columns'], row):

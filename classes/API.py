@@ -197,6 +197,7 @@ class StorageEngine:
 
 
     # TODO: create sama drop masih soft delete (fileny gak di delete)
+    # TODO: ini gatau bakal jadi pake class Schema atau enggak
     @staticmethod
     def create_table(table_name: str, schema: Schema) -> bool:
         column_list = [
