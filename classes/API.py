@@ -13,6 +13,9 @@ from classes.globals import CATALOG_FILE, BLOCK_SIZE, STATS_BASE_PATH
 from typing import Dict, Iterator
 import json
 import operator
+import os
+import tempfile
+import shutil
 
 class StorageEngine:
     operation_funcs : Dict = {
@@ -250,8 +253,90 @@ class StorageEngine:
 
 
     # secara otomatis bakal ngelakuin vacuuming juga
+    @staticmethod
     def defragment(table: str) -> bool:
-        pass
+        """
+        Defragments the table by removing deleted rows and reorganizing data
+        into contiguous blocks. Return true if successful.
+        """
+        try:
+            serializer = Serializer()
+            serializer.load_schema(table)
+            io = IO(table)
+
+            # Check row yang tidak terhapus
+            active_rows : list[list] = []
+            block_iterator = StorageEngine._sequential_search(io)
+            
+            while True:
+                idx = next(block_iterator, None)
+                if idx is None:
+                    break
+                
+                try:
+                    block = io.read(idx)
+                    rows = serializer.deserialize(block)
+                    active_rows.extend(rows)
+                except SerializerIncompleteBlockException as e:
+                    for _ in range(e.additional_needed_blocks):
+                        idx = next(block_iterator, None)
+                        if idx is None:
+                            break
+                        block += io.read(idx)
+                    rows = serializer.deserialize(block)
+                    active_rows.extend(rows)
+                except Exception as e:
+                    print(f"Error reading block {idx}: {e}")
+                    continue
+
+            # Buat temp file
+            temp_fd, temp_path = tempfile.mkstemp(suffix='.dat', dir='storage/data')
+            try:
+                os.close(temp_fd)
+                
+                temp_io = IO.__new__(IO)
+                temp_io.file_path = temp_path
+                
+                # Tulis ke temp file
+                if len(active_rows) > 0:
+                    block_idx : int = 0
+                    current_block : bytes = b""
+                    current_block_size : int = 0
+
+                    for row in active_rows:
+                        serialized_row = serializer.serialize([row])
+                        row_size = len(serialized_row)
+
+                        if current_block_size + row_size > BLOCK_SIZE:
+                            temp_io.write(block_idx, current_block)
+                            block_idx += 1
+                            current_block = b""
+                            current_block_size = 0
+
+                        current_block += serialized_row
+                        current_block_size += row_size
+
+                    if current_block_size > 0:
+                        temp_io.write(block_idx, current_block)
+                
+                # Ganti file asli dengan tempfile
+                if os.path.exists(io.file_path):
+                    os.remove(io.file_path)
+                shutil.move(temp_path, io.file_path)
+                
+                print(f"Defragmentation completed for table '{table}'. Active rows: {len(active_rows)}")
+            except Exception as e:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                raise e
+            return True
+
+        except FileNotFoundError:
+            print(f"Table file for '{table}' not found.")
+            return False
+        except Exception as e:
+            print(f"Error during defragmentation: {e}")
+            return False
 
     # karena return value nya class Statistic, ini return satu table aja, kalo mau multiple table handle di caller aj
     @staticmethod
