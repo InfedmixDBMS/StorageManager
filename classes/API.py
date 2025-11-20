@@ -6,6 +6,7 @@ The main class that other components will call. Contains the storage engine clas
 
 from scipy import stats
 from classes.IO import IO
+# from QueryProcessor.models.rows import Rows
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
 from classes.DataModels import Schema
@@ -27,9 +28,9 @@ class StorageEngine:
         Operation.LTE: operator.le,
     }
 
-    def read_block(self, data_retrieval: DataRetrieval) -> list[list]:
+    def read_block(self, data_retrieval: DataRetrieval) -> Rows:
         """
-        Returns rows that satisfy given conditions
+        Returns Rows object containing rows that satisfy conditions
         """
         table: str = data_retrieval.table
         io = IO(table)
@@ -37,11 +38,11 @@ class StorageEngine:
         serializer.load_schema(table)
 
         mappingCol = self.__create_column_mapping(serializer.schema["columns"])
-        res: list[list] = []  
+        all_columns = [col["name"] for col in serializer.schema["columns"]]
 
-        idx : int = 0
-        #TODO: Implement kalau ada index di colnya
+        res: list[list] = []
 
+        idx: int = 0
 
         while True:
             chunk: bytes = io.read(idx)
@@ -50,18 +51,18 @@ class StorageEngine:
 
             data = serializer.deserialize(chunk)
             for row in data:
-                passed : bool = True
+                passed = True
                 for condition in data_retrieval.conditions:
                     colIdx = mappingCol[condition.column]
-                    func = self.operation_funcs[condition.operation]  
+                    func = self.operation_funcs[condition.operation]
                     operand = condition.operand
 
                     if not func(row[colIdx], operand):
                         passed = False
-                        break  
+                        break
 
                 if passed:
-                    if data_retrieval.column:  #kalau pengen early projection columnya isi aj
+                    if data_retrieval.column:  
                         projected_row = [row[mappingCol[col]] for col in data_retrieval.column]
                         res.append(projected_row)
                     else:
@@ -69,7 +70,11 @@ class StorageEngine:
 
             idx += 1
 
-        return res  
+        if data_retrieval.column:
+            return Rows(columns=data_retrieval.column, data=res)
+        else:
+            return Rows(columns=all_columns, data=res)
+
     
     def write_block(data_write: DataWrite) -> int:
         """
