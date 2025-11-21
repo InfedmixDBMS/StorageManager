@@ -13,12 +13,12 @@ class IndexType(Enum):
     BTREE = "BTREE"
     HASH = "HASH"
 
-@dataclass
+@dataclass(order=True)
 class IndexPointer:
     block_idx: int
     offset: int
 
-@dataclass
+@dataclass(order=True)
 class IndexEntry(Generic[K]):
     key: K
     pointer: IndexPointer
@@ -53,17 +53,18 @@ class Index(ABC, Generic[K]):
         pass
 
     @abstractmethod
-    def insert(self, key: K, pointer: IndexPointer):
+    def insert(self, key: K, pointer: IndexPointer) -> bool:
         """ 
         Insert entry ke index
         Params:
             key: Key dari entry yang akan dimasukkan
             pointer: Pointer ke lokasi data sebenarnya
+        
         """
         pass
 
     @abstractmethod
-    def delete(self, key: K, specific_entry_pointer: IndexPointer | None = None) -> int:
+    def delete(self, key: K, specific_entry_pointer: IndexPointer | None = None) -> bool:
         """
         Delete semua entry dengan key tertentu dari index.
         Params:

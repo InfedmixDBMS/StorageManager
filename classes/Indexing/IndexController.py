@@ -131,7 +131,7 @@ class IndexController:
             self.index_map[index_name].load_metadata()
             
 if __name__ == "__main__":
-    from classes.Indexing.Index import IndexPointer
+    from classes.Indexing.Index import IndexPointer, IndexEntry
     with open(INDEX_META_FILE, "w") as f:
         json.dump({}, f, indent=2)
     index_controller = IndexController()
@@ -139,4 +139,9 @@ if __name__ == "__main__":
     # print(io.read(0))
     index_controller.set_index("student", "id", "BTREE", True)
     index = index_controller.get_index("student_id_BTREE")
-    index.insert((12345,), IndexPointer(block_idx=1, offset=0))
+    for i in range(1000000):
+        tup = (i,)
+        pointer = IndexPointer(block_idx=23+i, offset=(2+i)%512)
+        entry = IndexEntry(key=tup, pointer=pointer)
+        if not index.insert(entry):
+            break
