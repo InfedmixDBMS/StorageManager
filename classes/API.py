@@ -30,9 +30,6 @@ class StorageEngine:
     }
 
     def read_block(self, data_retrieval: DataRetrieval) -> Rows:
-        """
-        Returns Rows object containing rows that satisfy conditions
-        """
         table = data_retrieval.table
         io = IO(table)
         serializer = Serializer()
@@ -46,23 +43,26 @@ class StorageEngine:
 
         for idx in block_idx_gen:
             chunk = io.read(idx)
-
             if not chunk:
                 continue
 
-            try:
-                data = serializer.deserialize(chunk)
+            full_chunk = bytearray(chunk)
+            data = None
 
-            except SerializerIncompleteBlockException as e:
-                full_chunk = bytearray(chunk)
+            while True:
+                try:
+                    data = serializer.deserialize(full_chunk)
+                    break
 
-                for _ in range(e.additional_needed_blocks):
-                    next_idx = next(block_idx_gen, None)
-                    if next_idx is None:
-                        break
-                    full_chunk.extend(io.read(next_idx))
+                except SerializerIncompleteBlockException as e:
+                    for _ in range(e.additional_needed_blocks):
+                        next_idx = next(block_idx_gen, None)
+                        if next_idx is None:
+                            raise RuntimeError(
+                                "Unexpected EOF while reading multi-block record"
+                            )
 
-                data = serializer.deserialize(full_chunk)
+                        full_chunk.extend(io.read(next_idx))
 
             for row in data:
                 passed = True
