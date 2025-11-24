@@ -29,13 +29,13 @@ class StorageEngine:
         Operation.LTE: operator.le,
     }
 
-    def read_block(self, data_retrieval: DataRetrieval) -> Rows:
+    def read_block(data_retrieval: DataRetrieval) -> Rows:
         table = data_retrieval.table
         io = IO(table)
         serializer = Serializer()
         serializer.load_schema(table)
 
-        mappingCol = self.__create_column_mapping(serializer.schema["columns"])
+        mappingCol = StorageEngine.__create_column_mapping(serializer.schema["columns"])
         all_columns = [col["name"] for col in serializer.schema["columns"]]
         res: list[list[Any]] = []
 
@@ -70,7 +70,7 @@ class StorageEngine:
                     colVal = mappingCol[condition.column]
                     colIdx = colVal[0]
                     colType = colVal[1]
-                    func = self.operation_funcs[condition.operation]
+                    func = StorageEngine.operation_funcs[condition.operation]
                     operand = condition.operand
                 
                     if(colType == 'float'):
@@ -446,7 +446,8 @@ class StorageEngine:
 
 
     #Helper method
-    def __create_column_mapping(self,columns: list[dict]) -> dict[str, int]:
+    @staticmethod
+    def __create_column_mapping(columns: list[dict]) -> dict[str, int]:
         print(columns)
         mapping = {}
         for i, col in enumerate(columns):
