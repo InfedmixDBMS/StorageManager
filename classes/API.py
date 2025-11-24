@@ -6,11 +6,10 @@ The main class that other components will call. Contains the storage engine clas
 
 from scipy import stats
 from classes.IO import IO
-from QueryProcessor.models.rows import Rows
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
 from typing import Any
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
-from classes.DataModels import Schema
+from classes.DataModels import Schema, Rows
 from classes.globals import CATALOG_FILE, BLOCK_SIZE, STATS_BASE_PATH
 from typing import Dict, Iterator
 import json
@@ -18,6 +17,7 @@ import operator
 import os
 import tempfile
 import shutil
+import struct
 
 class StorageEngine:
     operation_funcs : Dict = {
@@ -67,10 +67,16 @@ class StorageEngine:
             for row in data:
                 passed = True
                 for condition in data_retrieval.conditions:
-                    colIdx = mappingCol[condition.column]
+                    colVal = mappingCol[condition.column]
+                    colIdx = colVal[0]
+                    colType = colVal[1]
                     func = self.operation_funcs[condition.operation]
                     operand = condition.operand
-
+                
+                    if(colType == 'float'):
+                        b = struct.pack('!f', operand)         
+                        x = struct.unpack('!f', b)[0] 
+                        operand = x
                     if not func(row[colIdx], operand):
                         passed = False
                         break
@@ -441,9 +447,10 @@ class StorageEngine:
 
     #Helper method
     def __create_column_mapping(self,columns: list[dict]) -> dict[str, int]:
+        print(columns)
         mapping = {}
         for i, col in enumerate(columns):
-            mapping[col["name"]] = i
+            mapping[col["name"]] = (i,col['type'])
         return mapping
 
     # def update_stats
