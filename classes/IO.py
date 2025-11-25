@@ -22,9 +22,17 @@ class IO:
         data - serialized data
         """
         mode = "r+b" if os.path.exists(self.file_path) else "wb"
+        
+        # Correctly pad the data to the next full block boundary
+        current_len = len(data)
+        bytes_to_write = data
+        if current_len % BLOCK_SIZE != 0:
+            padding_needed = BLOCK_SIZE - (current_len % BLOCK_SIZE)
+            bytes_to_write += b'\x00' * padding_needed
+
         with open(self.file_path, mode) as f:
             f.seek(BLOCK_SIZE * block_idx)
-            return f.write(data.ljust(BLOCK_SIZE, b'\x00'))
+            return f.write(bytes_to_write)
 
     def delete(self, block_idx: int) -> int:
         """
@@ -38,5 +46,8 @@ class IO:
         """
         get the index of the last block in file
         """
-        stat = os.stat(self.file_path)  # From os metadata
-        return (stat.st_size - 1) // BLOCK_SIZE
+        try:
+            stat = os.stat(self.file_path)  # From os metadata
+            return (stat.st_size - 1) // BLOCK_SIZE
+        except FileNotFoundError:
+            return -1

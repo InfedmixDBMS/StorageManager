@@ -57,11 +57,11 @@ def test_update_stats():
     storageIO = IO("student")
     
     dummy = [
-        [0 ,101, "Alice Wonderland", 3.8],
-        [1 ,102, "Bob Builder", 3.8],
-        [2 ,103, "Charlie Chaplin", 3.9],
-        [3 ,104, "David Beckham", 3.2],
-        [4 ,105, "Eva Green", 4.0]
+        [101, "Alice Wonderland", 3.8],
+        [102, "Bob Builder", 3.8],
+        [103, "Charlie Chaplin", 3.9],
+        [104, "David Beckham", 3.2],
+        [105, "Eva Green", 4.0]
     ]
 
     data = s.serialize(dummy)
@@ -80,11 +80,11 @@ def test_read():
     # storageIO = IO("student")
     
     # dummy = [
-    #     [0 ,101, "Alice Wonderland", 3.8],
-    #     [1 ,102, "Bob Builder", 3.8],
-    #     [2 ,103, "Charlie Chaplin", 3.9],
-    #     [3 ,104, "David Beckham", 3.2],
-    #     [4 ,105, "Eva Green", 4.0]
+    #     [101, "Alice Wonderland", 3.8],
+    #     [102, "Bob Builder", 3.8],
+    #     [103, "Charlie Chaplin", 3.9],
+    #     [104, "David Beckham", 3.2],
+    #     [105, "Eva Green", 4.0]
     # ]
 
     # data = s.serialize(dummy)
@@ -125,35 +125,35 @@ def test_write():
 
     #data dibawah ini kalo write berhasil tapi,kalo read error di deserialize
     # dummy_insert = [
-    #     [0, 101, "Alice Wonderland", 3.8],
-    #     [1, 102, "Bob Builder", 3.8],
-    #     [2, 103, "Charlie Chaplin", 3.9],
-    #     [3, 104, "David Beckham", 3.2],
-    #     [4, 105, "Eva Green", 4.0],
+    #     [101, "Alice Wonderland", 3.8],
+    #     [102, "Bob Builder", 3.8],
+    #     [103, "Charlie Chaplin", 3.9],
+    #     [104, "David Beckham", 3.2],
+    #     [105, "Eva Green", 4.0],
 
-    #     [5, 106, "John Doe", 3.6],
-    #     [6,107, "Maria Hill", 3.7],
-    #     [7, 108, "Peter Parker", 3.5],
-    #     [8, 109, "Tony Stark", 3.9],
-    #     [9, 110, "Bruce Wayne", 3.4],
-    #     [10, 111, "Clark Kent", 3.1],
-    #     [11, 112, "Diana Prince", 3.9],
-    #     [12, 113, "Barry Allen", 3.3],
-    #     [13, 114, "Arthur Curry", 3.2],
-    #     [14, 115, "Natasha Romanoff", 3.8],
-    #     [15, 116, "Steve Rogers", 3.7],
-    #     [16, 117, "Wanda Maximoff", 3.9],
-    #     [17, 118, "Stephen Strange", 3.5]
+    #     [106, "John Doe", 3.6],
+    #     [107, "Maria Hill", 3.7],
+    #     [108, "Peter Parker", 3.5],
+    #     [109, "Tony Stark", 3.9],
+    #     [110, "Bruce Wayne", 3.4],
+    #     [111, "Clark Kent", 3.1],
+    #     [112, "Diana Prince", 3.9],
+    #     [113, "Barry Allen", 3.3],
+    #     [114, "Arthur Curry", 3.2],
+    #     [115, "Natasha Romanoff", 3.8],
+    #     [116, "Steve Rogers", 3.7],
+    #     [117, "Wanda Maximoff", 3.9],
+    #     [118, "Stephen Strange", 3.5]
     # ]
 
     #data ini memang berhasil write tapi entah kenapa dia jadi gagal read block kalo writeny dari storage engine
     #sementara kalo langsung dari IO bisa
     dummy_insert = [
-        [0 ,101, "Alice Wonderland", 3.8],
-        [1 ,102, "Bob Builder", 3.8],
-        [2 ,103, "Charlie Chaplin", 3.9],
-        [3 ,104, "David Beckham", 3.2],
-        [4 ,105, "Eva Green", 4.0]
+        [101, "Alice Wonderland", 3.8],
+        [102, "Bob Builder", 3.8],
+        [103, "Charlie Chaplin", 3.9],
+        [104, "David Beckham", 3.2],
+        [105, "Eva Green", 4.0]
     ]
  
     data_request : DataWrite = DataWrite(
@@ -167,10 +167,14 @@ def test_write():
     print("Row Affected " + str(berhasil))
 
 if __name__ == "__main__":
+    # Clean up previous test runs
+    # if os.path.exists("storage/data/student.dat"):
+        # os.remove("storage/data/student.dat")
+
     # run API tests
     # test_write_block_api()
     # test_read_block_api()
     # test_delete_block_api()
     # test_update_stats( )
-    # test_write()
+    test_write()
     test_read()

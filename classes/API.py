@@ -116,6 +116,7 @@ class StorageEngine:
                     new_row.append(row[i_idx])
                     i_idx += 1
 
+                # TODO:ini kalo column yang dikasih QP tidak sesuai order yang sama dengan catalog.json, bakal rusak insertnya
                 # Imputation
                 # TODO: column generator, mungkin default value atau inkremen suatu sequence
                 elif col["name"] in ["id"]:  # Auto increment id if insert
