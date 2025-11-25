@@ -4,7 +4,6 @@ API.py (Working Title)
 The main class that other components will call. Contains the storage engine class as shown in spec
 """
 
-from scipy import stats
 from classes.IO import IO
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
 from typing import Any

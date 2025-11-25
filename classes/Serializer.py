@@ -137,6 +137,7 @@ class Serializer:
                 needed_blocks = (missing + BLOCK_SIZE - 1) // BLOCK_SIZE
                 raise SerializerIncompleteBlockException(needed_blocks)
 
+            # TODO: ganti pake struct.unpack_from(format, buffer, offset)
             tuple_data : bytes = raw_data[pointer : pointer+tuple_length]
             pointer += tuple_length
 
