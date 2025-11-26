@@ -22,7 +22,16 @@ class Serializer:
         """
             Loads a schema from json file into the schema attribute based on table name
         """
-        self.schema = self.json[table_name]
+        user_schema = self.json[table_name].copy()
+
+        row_column = {
+            "name": "__row_id", 
+            "type": "int",
+            "length": 2,
+            "system": True
+        }
+
+        self.schema['columns'] = row_column + user_schema['columns']
 
 
 
