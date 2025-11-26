@@ -4,11 +4,11 @@ API.py (Working Title)
 The main class that other components will call. Contains the storage engine class as shown in spec
 """
 
+from scipy import stats
 from classes.IO import IO
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
-from typing import Any
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
-from classes.DataModels import Schema, Rows
+from classes.DataModels import Schema
 from classes.globals import CATALOG_FILE, BLOCK_SIZE, STATS_BASE_PATH
 from typing import Dict, Iterator
 import json
@@ -16,7 +16,6 @@ import operator
 import os
 import tempfile
 import shutil
-import struct
 
 class StorageEngine:
     operation_funcs : Dict = {
@@ -28,77 +27,47 @@ class StorageEngine:
         Operation.LTE: operator.le,
     }
 
-    def read_block(data_retrieval: DataRetrieval) -> Rows:
-        table = data_retrieval.table
+    def read_block(self, data_retrieval: DataRetrieval) -> list[list]:
+        table: str = data_retrieval.table
         io = IO(table)
         serializer = Serializer()
         serializer.load_schema(table)
 
-        mappingCol = StorageEngine.__create_column_mapping(serializer.schema["columns"])
-        all_columns = [col["name"] for col in serializer.schema["columns"]]
-        res: list[list[Any]] = []
+        mappingCol = self.__create_column_mapping(serializer.schema["columns"])
+        res: list[list] = []  
 
-        block_idx_gen = StorageEngine._sequential_search(io)
+        idx : int = 0
+        #TODO: Implement kalau ada index di colnya
 
-        for idx in block_idx_gen:
-            chunk = io.read(idx)
-            if not chunk:
-                continue
+        while True:
+            chunk: bytes = io.read(idx)
+            if not chunk:  # EOF
+                break
 
-            full_chunk = bytearray(chunk)
-            data = None
-
-            while True:
-                try:
-                    data = serializer.deserialize(full_chunk)
-                    break
-
-                except SerializerIncompleteBlockException as e:
-                    for _ in range(e.additional_needed_blocks):
-                        next_idx = next(block_idx_gen, None)
-                        if next_idx is None:
-                            raise RuntimeError(
-                                "Unexpected EOF while reading multi-block record"
-                            )
-
-                        full_chunk.extend(io.read(next_idx))
-
+            data = serializer.deserialize(chunk)
             for row in data:
-                passed = True
+                passed : bool = True
                 for condition in data_retrieval.conditions:
-                    colVal = mappingCol[condition.column]
-                    colIdx = colVal[0]
-                    colType = colVal[1]
-                    func = StorageEngine.operation_funcs[condition.operation]
+                    colIdx = mappingCol[condition.column]
+                    func = self.operation_funcs[condition.operation]  
                     operand = condition.operand
-                
-                    if(colType == 'float'):
-                        b = struct.pack('!f', operand)         
-                        x = struct.unpack('!f', b)[0] 
-                        operand = x
+
                     if not func(row[colIdx], operand):
                         passed = False
-                        break
+                        break  
 
                 if passed:
-                    if data_retrieval.column:
+                    if data_retrieval.column:  #kalau pengen early projection columnya isi aj
                         projected_row = [row[mappingCol[col]] for col in data_retrieval.column]
                         res.append(projected_row)
                     else:
                         res.append(row)
 
-        return Rows(
-            columns=data_retrieval.column if data_retrieval.column else all_columns,
-            data=res
-        )
+            idx += 1
 
-
-
+        return res  
     
     def write_block(data_write: DataWrite) -> int:
-        """
-            Returns number of rows affected
-        """
         table: str = data_write.table
         serializer = Serializer()
         serializer.load_schema(table)
@@ -116,7 +85,6 @@ class StorageEngine:
                     new_row.append(row[i_idx])
                     i_idx += 1
 
-                # TODO:ini kalo column yang dikasih QP tidak sesuai order yang sama dengan catalog.json, bakal rusak insertnya
                 # Imputation
                 # TODO: column generator, mungkin default value atau inkremen suatu sequence
                 elif col["name"] in ["id"]:  # Auto increment id if insert
@@ -167,13 +135,17 @@ class StorageEngine:
                 flush_block()
             row += 1
 
+        # Update max_row_id 
+        if len(inserted_values) > 0:
+            max_inserted_id = max(row[0] for row in inserted_values)
+            current_max = StorageEngine.get_next_row_id(table) - 1
+            if max_inserted_id > current_max:
+                StorageEngine._update_max_row_id(table, max_inserted_id)
+
         return res
 
 
     def delete_block(data_deletion: DataDeletion) -> int:
-        """
-            Returns number of rows affected
-        """
         table: str = data_deletion.table
         io = IO(table)
         serializer = Serializer()
@@ -281,8 +253,7 @@ class StorageEngine:
     @staticmethod
     def defragment(table: str) -> bool:
         """
-        Defragments the table by removing deleted rows and reorganizing data
-        into contiguous blocks. Return true if successful.
+        Return true if successful.
         """
         try:
             serializer = Serializer()
@@ -291,6 +262,7 @@ class StorageEngine:
 
             # Check row yang tidak terhapus
             active_rows : list[list] = []
+            max_row_id : int = -1
             block_iterator = StorageEngine._sequential_search(io)
             
             while True:
@@ -301,6 +273,9 @@ class StorageEngine:
                 try:
                     block = io.read(idx)
                     rows = serializer.deserialize(block)
+                    for row in rows:
+                        if row[0] > max_row_id:
+                            max_row_id = row[0]
                     active_rows.extend(rows)
                 except SerializerIncompleteBlockException as e:
                     for _ in range(e.additional_needed_blocks):
@@ -309,6 +284,9 @@ class StorageEngine:
                             break
                         block += io.read(idx)
                     rows = serializer.deserialize(block)
+                    for row in rows:
+                        if row[0] > max_row_id:
+                            max_row_id = row[0]
                     active_rows.extend(rows)
                 except Exception as e:
                     print(f"Error reading block {idx}: {e}")
@@ -349,6 +327,9 @@ class StorageEngine:
                     os.remove(io.file_path)
                 shutil.move(temp_path, io.file_path)
                 
+                # Update max_row_id
+                StorageEngine._update_max_row_id(table, max_row_id)
+                
                 print(f"Defragmentation completed for table '{table}'. Active rows: {len(active_rows)}")
             except Exception as e:
                 if os.path.exists(temp_path):
@@ -382,6 +363,51 @@ class StorageEngine:
             print("Unexcpected error in get_stats(): ", e)
 
     @staticmethod
+    def get_next_row_id(table: str) -> int:
+        try:
+            with open(STATS_BASE_PATH + table + "_stats.json", "r") as f:
+                stats_data = json.load(f)
+                max_row_id = stats_data.get("max_row_id", -1)
+                return max_row_id + 1
+        except FileNotFoundError:
+            # Stats file doesn't exist, return 0
+            return 0
+        except Exception as e:
+            print(f"Error in get_next_row_id: {e}")
+            return 0
+
+    @staticmethod
+    def _update_max_row_id(table: str, max_row_id: int) -> None:
+        """
+        Updates the max_row_id in statistics file.
+        Creates the file if it doesn't exist.
+        """
+        try:
+            file_path = STATS_BASE_PATH + table + "_stats.json"
+            
+            try:
+                with open(file_path, "r") as f:
+                    stats = json.load(f)
+            except FileNotFoundError:
+                stats = {
+                    "n_r": 0,
+                    "b_r": 0,
+                    "f_r": 0,
+                    "l_r": 0,
+                    "V_a_r": {},
+                    "max_row_id": -1
+                }
+            
+            # Update max_row_id
+            stats["max_row_id"] = max_row_id
+            
+            # Write back
+            with open(file_path, "w") as f:
+                json.dump(stats, f, indent=2)
+        except Exception as e:
+            print(f"Error updating max_row_id: {e}")
+
+    @staticmethod
     def update_stats(table: str = "all") -> None:
         """
             Updates the statistics file for the given table
@@ -404,6 +430,7 @@ class StorageEngine:
         br : int = io.get_last_block_index() + 1 # number of blocks containing tuples
         unique_values : dict[str, set] = [set() for column in serializer.schema["columns"] if column["name"] != "__s"]
         v_a_r : dict[str, int] = {}
+        max_row_id : int = -1
 
         # size of tuple ambil average tuple size
         total_row_size : int = 0
@@ -418,6 +445,8 @@ class StorageEngine:
                 total_row_size += serializer.get_row_size(row)
                 for col, value in enumerate(row):
                     unique_values[col].add(value)
+                if row[0] > max_row_id:
+                    max_row_id = row[0]
                 nr += 1
 
 
@@ -433,7 +462,8 @@ class StorageEngine:
             "b_r": br,
             "f_r": fr,
             "l_r": lr,
-            "V_a_r": v_a_r
+            "V_a_r": v_a_r,
+            "max_row_id": max_row_id
         }
 
         file_path = STATS_BASE_PATH + table + "_stats.json"
@@ -446,12 +476,10 @@ class StorageEngine:
 
 
     #Helper method
-    @staticmethod
-    def __create_column_mapping(columns: list[dict]) -> dict[str, int]:
-        print(columns)
+    def __create_column_mapping(self,columns: list[dict]) -> dict[str, int]:
         mapping = {}
         for i, col in enumerate(columns):
-            mapping[col["name"]] = (i,col['type'])
+            mapping[col["name"]] = i
         return mapping
 
     # def update_stats

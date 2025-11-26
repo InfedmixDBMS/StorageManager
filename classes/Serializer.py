@@ -31,7 +31,8 @@ class Serializer:
             "system": True
         }
 
-        self.schema['columns'] = row_column + user_schema['columns']
+        self.schema = user_schema
+        self.schema['columns'] = [row_column] + user_schema['columns']
 
 
 
