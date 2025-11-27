@@ -38,7 +38,7 @@ class StorageEngine:
         return [col['name'] for col in serializer.schema['columns']]
 
     @staticmethod
-    def read_block(self, data_retrieval: DataRetrieval) -> list[list]:
+    def read_block(data_retrieval: DataRetrieval) -> list[list]:
         table: str = data_retrieval.table
         io = IO(table)
         serializer = Serializer()
@@ -300,6 +300,10 @@ class StorageEngine:
                     new_rows.append(row)
             res += sum(flag_delete)
             new_block = serializer.serialize(new_rows)
+
+            if len(new_rows) == 0:
+                new_block = b'\x00' * BLOCK_SIZE
+
             io.write(idx ,new_block)
             idx = next(block_idx_gen, None)
         
