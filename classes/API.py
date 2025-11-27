@@ -180,6 +180,7 @@ class StorageEngine:
         io = IO(table)
         serializer = Serializer()
         serializer.load_schema(table)
+        mappingCol = StorageEngine.__create_column_mapping(serializer.schema["columns"])
 
         res : int = 0
         
@@ -200,12 +201,21 @@ class StorageEngine:
             flag_delete = [False] * len(rows)
 
             for condition in data_deletion.conditions:
-                colIdx : int = serializer.schema["columns"].find(condition.column)
+                colVal = mappingCol[condition.column]
+                colIdx = colVal[0]
+                colType = colVal[1]
+                operand = condition.operand
+
+                if(colType == 'float'):
+                    b = struct.pack('!f', operand)         
+                    x = struct.unpack('!f', b)[0] 
+                    operand = x
+
                 func = StorageEngine.operation_funcs[condition.operation]
                 for irow, row in enumerate(rows):
                     if flag_delete[irow]:
                         continue
-                    if func(row[colIdx], condition.operand):
+                    if func(row[colIdx],operand):
                         flag_delete[irow] = True
 
             # TODO: Update index
@@ -216,7 +226,7 @@ class StorageEngine:
                     new_rows.append(row)
             res += sum(flag_delete)
             new_block = serializer.serialize(new_rows)
-            io.write(new_block)
+            io.write(idx ,new_block)
             idx = next(block_idx_gen, None)
         
         return res

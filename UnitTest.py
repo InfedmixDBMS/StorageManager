@@ -1,6 +1,6 @@
 import os
 from classes.Types import IntType, VarCharType, FloatType, CharType
-from classes.DataModels import Schema, Statistic, DataRetrieval, Rows, Condition,Operation, DataWrite
+from classes.DataModels import Schema, Statistic, DataRetrieval, Rows, Condition,Operation, DataWrite, DataDeletion
 from classes.Serializer import Serializer
 from classes.IO import IO
 from classes.API import StorageEngine
@@ -165,6 +165,11 @@ def test_write():
     berhasil = StorageEngine.write_block(data_request)
     print("Row Affected " + str(berhasil))
 
+def test_delete():
+    data_del : DataDeletion = DataDeletion("student", [Condition('ipk', Operation.GTE, 3.8)])
+    berhasil = StorageEngine.delete_block(data_del)
+    print("Row Affected " + str(berhasil))
+
 if __name__ == "__main__":
     # Clean up previous test runs
     # if os.path.exists("storage/data/student.dat"):
@@ -175,5 +180,13 @@ if __name__ == "__main__":
     # test_read_block_api()
     # test_delete_block_api()
     # test_update_stats( )
-    test_write()
+    # test_write()
+    # test_read()
+
+    test_read()
+    print()
+    print()
+    test_delete()
+    print()
+    print()
     test_read()
