@@ -30,8 +30,16 @@ class StorageEngine:
         Operation.LTE: operator.le,
     }
 
-    def read_block(data_retrieval: DataRetrieval) -> Rows:
-        table = data_retrieval.table
+    @staticmethod
+    # Returns a list containing column names
+    def load_schema_names(table_name: str) -> list[str]:
+        serializer = Serializer()
+        serializer.load_schema(table_name)
+        return [col['name'] for col in serializer.schema['columns']]
+
+    @staticmethod
+    def read_block(self, data_retrieval: DataRetrieval) -> list[list]:
+        table: str = data_retrieval.table
         io = IO(table)
         serializer = Serializer()
         serializer.load_schema(table)
@@ -94,6 +102,7 @@ class StorageEngine:
             data=res
         )
     
+    @staticmethod
     def write_block(data_write: DataWrite) -> int:
         table: str = data_write.table
         serializer = Serializer()
@@ -194,7 +203,7 @@ class StorageEngine:
 
         return res
 
-
+    @staticmethod
     def delete_block(data_deletion: DataDeletion) -> int:
         table: str = data_deletion.table
         io = IO(table)
