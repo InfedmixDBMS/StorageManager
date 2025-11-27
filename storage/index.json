@@ -1,11 +1,38 @@
 {
-    "student_pkey": {
-        "file_path": "storage/data/student_pkey.idx",
-        "table": "student",
-        "column": ["id"],
-        "key_type": ["int"],
-        "unique": true,
-        "type": "BTREE",
-        "max_children": 5
-    }
+  "student_id_BTREE": {
+    "file_path": "storage/data/student_id_BTREE.idx",
+    "table": "student",
+    "columns": [
+      "id"
+    ],
+    "key_type": [
+      "int"
+    ],
+    "unique": true,
+    "type": "BTREE"
+  },
+  "course_description_BTREE": {
+    "file_path": "storage/data/course_description_BTREE.idx",
+    "table": "course",
+    "columns": [
+      "description"
+    ],
+    "key_type": [
+      "varchar"
+    ],
+    "unique": false,
+    "type": "BTREE"
+  },
+  "course_id_BTREE": {
+    "file_path": "storage/data/course_id_BTREE.idx",
+    "table": "course",
+    "columns": [
+      "id"
+    ],
+    "key_type": [
+      "int"
+    ],
+    "unique": true,
+    "type": "BTREE"
+  }
 }

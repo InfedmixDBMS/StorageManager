@@ -36,9 +36,9 @@ class BTreeNode:
         """
         Mengembalikan key pada index tertentu, beserta diskriminator jika ada
         """
-        if self.is_unique or not self.is_leaf:
-            return self.keys[index]
-        return self.keys[index] + (self.pointers[index].block_idx, self.pointers[index].offset)
+        if not self.is_unique and self.is_leaf:
+            return self.keys[index] + (self.pointers[index].block_idx, self.pointers[index].offset)
+        return self.keys[index]
 
     def get_pointer(self, index: int) -> int | IndexPointer:
         return self.pointers[index]
@@ -107,8 +107,24 @@ class BTreeNode:
         return True
 
     def delete_key(self, entry: IndexEntry[K]) -> bool:
-        # TODO: implement delete_key
-        pass
+        delete_idx: int = -1
+        for i in range(self.num_keys):
+            if self.get_pure_key(i) == entry.key:
+                if self.is_unique:  # Gaperlu cek pointer (block_idx dan offset)
+                    delete_idx = i
+                    break
+                else:
+                    ptr = self.get_pointer(i)
+                    if isinstance(ptr, IndexPointer) and ptr == entry.pointer:
+                        delete_idx = i
+                        break
+        if delete_idx == -1:
+            return False
+        
+        self.keys.pop(delete_idx)
+        self.pointers.pop(delete_idx if not self.is_leaf else delete_idx)
+        self.num_keys -= 1
+        return True
 
     def split(self) -> tuple["BTreeNode", IndexEntry[K], "BTreeNode"]:
         """
@@ -203,7 +219,6 @@ class BTreeIndex(Index[K]):
             right_block_idx: int = -1
             
             left_node, middle_entry, right_node = nodes_stack[-1].split()
-            print("SPLITTING ", nodes_stack[-1].num_keys ," into " ,left_node.num_keys, right_node.num_keys)
             if len(nodes_stack) == 1:
                 # Split root node. Height tree bertambah
                 left_block_idx = self.io.get_last_block_index() + 1
@@ -226,6 +241,10 @@ class BTreeIndex(Index[K]):
                     height=nodes_stack[-1].height + 1,
                     is_unique=self.unique
                 )
+                if not self.unique and right_node.is_leaf: 
+                    # First height increase. Update root key with disctiminator
+                    right_pointer = right_node.get_pointer(0)
+                    root_node.keys[0] = root_node.keys[0] + (right_pointer.block_idx, right_pointer.offset)
                 self._write_through_node(self.root_block_index, root_node)
                 self.root = root_node
                 need_write = False
@@ -252,12 +271,31 @@ class BTreeIndex(Index[K]):
                 print(f"Error writing nodes: {e}")
                 return False
 
-        print("INSERT KEY: ", entry.key, entry.pointer)
         return True
 
-    def delete(self, key: K, specific_entry_pointer: IndexPointer | None = None) -> bool:
-        # TODO: implement B-Tree delete logic
-        pass
+    def delete(self, entry: IndexEntry[K]) -> bool:
+        if not self.root:
+            self.root = self._read_node(self.root_block_index)
+
+        node: BTreeNode = self.root
+        idx_stack: list[int] = [self.root_block_index]
+        nodes_stack: list[BTreeNode] = [node]
+        
+        # -------- Traverse internal nodes --------
+        while not nodes_stack[-1].is_leaf:
+            next_idx = nodes_stack[-1].search_key(entry.key, entry.pointer if not self.unique else None)
+            idx_stack.append(next_idx)
+            nodes_stack.append(self._read_node(next_idx))
+        
+        # -------- Leaf --------
+        node = nodes_stack[-1]
+        success = node.delete_key(entry)
+        # TODO: rebalancing nodes if underflow
+
+        if not success:
+            return False
+        self._write_through_node(idx_stack[-1], nodes_stack[-1])
+        return True
 
     def search(self, key: K) -> Iterator[IndexEntry[K]]:
         if not self.root:
@@ -310,21 +348,22 @@ class BTreeIndex(Index[K]):
     """
         Node Structure: HEADER | Key[] | Pointer[]
         
-        Header Structure (16 bytes):
-            HEADER = next_leaf | parent_node | num_keys | is_leaf | is_root | height | padding
+        Header Structure (20 bytes):
+            HEADER = next_leaf | parent_node | num_keys | is_leaf | is_root | height | next_block | padding
         next_leaf (4 bytes, optional): pointer ke leaf node berikutnya (hanya untuk leaf node)
         parent_node (4 bytes, optional): pointer ke parent node (untuk selain root node)
         num_keys (2 bytes): jumlah key yang ada di node
         is_leaf (1 byte): apakah node adalah leaf ("L") atau internal ("I")
         is_root (1 byte): apakah node adalah root ("R") atau bukan ("N")
         height (1 byte): tinggi node dalam tree (0 untuk leaf)
-        padding (3 bytes): reserved. Untuk align 16 bytes
+        padding (3 bytes): reserved. Untuk align 4 bytes
+        next_block (4 byte): untuk spanning node, blok selanjutnya yang dipakai, bernilai 0 jika bukan spanning node
         
         Key Structure:
             Key = key_data
         key_data : data key
             - Untuk IntType, FloatType: 4 bytes
-            - Untuk CharType, n bytes
+            - Untuk CharType, 2+n bytes (malas handle UTF-8, jadi tambhakan info panjang aktual)
             - Untuk VarCharType, 2+m bytes (dengan 2 bytes untuk length prefix)
         
         Pointer Structure (internal):
@@ -336,24 +375,32 @@ class BTreeIndex(Index[K]):
         byte_offset (2 bytes): offset byte dalam blok
         Pointer Structure (leaf, non-unique):
             # NOTE: If non-unique, the block index and offset are stored in the key itself to prevent redundancy
+        
+        Continuation block for spanning node: 
+            next_block | clipped_content
+        next_block (4 bytes): block index dari blok selanjutnya. 0 jika tidak ada lagi blok.
+        clipped_content (max BLOCK_SIZE - 4 bytes): sisa data node yang tidak muat di blok sebelumnya.
     """
     def _write_through_node(self, block_index: int, node: BTreeNode):
         """
         Serialize, lalu tulis node ke blok index tertentu.
         """
+        headers: list[bytes] = [b"" for _ in range(8)]
         serialized_node: list[bytes] = []
 
         # Header
-        serialized_node.append(struct.pack("<I", node.next_leaf))
-        serialized_node.append(struct.pack("<I", node.parent_node))
-        serialized_node.append(struct.pack("<H", node.num_keys))
-        serialized_node.append(struct.pack("<B", ord('L') if node.is_leaf else ord('I')))
-        serialized_node.append(struct.pack("<B", ord('R') if node.is_root else ord('N')))
-        serialized_node.append(struct.pack("<B", node.height + ord('0')))
-        serialized_node.append(b'\x00' * 3)  # padding
+        headers[0] = struct.pack("<I", node.next_leaf)
+        headers[1] = struct.pack("<I", node.parent_node)
+        headers[2] = struct.pack("<H", node.num_keys)
+        headers[3] = struct.pack("<B", ord('L') if node.is_leaf else ord('I'))
+        headers[4] = struct.pack("<B", ord('R') if node.is_root else ord('N'))
+        headers[5] = struct.pack("<B", node.height + ord('0'))
+        headers[6] = b'\x00' * 3  # padding
+        headers[7] = struct.pack("<I", 0)  # next block for spanning node
 
         # Keys
-        for key in node.keys:
+        for key_idx in range(node.num_keys):
+            key = node.get_pure_key(key_idx)
             for i, key_type in enumerate(self.key_types):
                 try:
                     key_type.validate(key[i])
@@ -364,18 +411,22 @@ class BTreeIndex(Index[K]):
                 elif isinstance(key_type, FloatType):
                     serialized_node.append(struct.pack("<f", key[i]))
                 elif isinstance(key_type, CharType):
-                    serialized_node.append(key[i])
+                    encoded = key[i].encode('utf-8')
+                    padded = encoded.ljust(key_type.length, b'\x00')
+                    serialized_node.append(struct.pack("<H", len(encoded)))
+                    serialized_node.append(padded)
                 elif isinstance(key_type, VarCharType):
-                    serialized_node.append(struct.pack("<H", len(key[i])))
-                    serialized_node.append(key[i])
+                    encoded = key[i].encode('utf-8')
+                    serialized_node.append(struct.pack("<H", len(encoded)))
+                    serialized_node.append(encoded)
                 else:
                     raise ValueError("[StorageManager] Unknown key type")
             
-            if not node.is_leaf and not node.is_unique:
+            if not node.is_leaf and not self.unique:
                 # Append discriminator to key for internal non-unique nodes
-                pointer = node.pointers[node.keys.index(key)]
-                serialized_node.append(struct.pack("<I", pointer.block_idx))
-                serialized_node.append(struct.pack("<H", pointer.offset))
+                discriminated_key = node.get_key(key_idx)
+                serialized_node.append(struct.pack("<I", discriminated_key[-2]))  # block_idx
+                serialized_node.append(struct.pack("<H", discriminated_key[-1]))  # offset
 
         # Pointers
         if not node.is_leaf:
@@ -386,12 +437,35 @@ class BTreeIndex(Index[K]):
                 serialized_node.append(struct.pack("<I", pointer.block_idx))
                 serialized_node.append(struct.pack("<H", pointer.offset))
 
-        block = b"".join(serialized_node)
-        if len(block) > BLOCK_SIZE:
-            print("BLOCK size error ", len(block))
+        blob = b"".join(headers + serialized_node)
+        if len(blob) > BLOCK_SIZE and node.num_keys > 1:
             raise BTreeInsertedMaxKeyException("[BTreeIndex] Index node data exceeds block size")
+        elif len(blob) > BLOCK_SIZE: # Allow 1 key node to overflow. Do not index VARCHAR guys
+            # --- Spanning node ---
+            # Allocate at least 1 continuation block
+            new_block_idx = self.io.get_last_block_index() + 1
+            headers[7] = struct.pack("<I", new_block_idx)  # next block for spanning node
+            blob = b"".join(headers + serialized_node)
 
-        self.io.write(block_index, block)
+            blocks = [blob[0 : BLOCK_SIZE]]
+            sections = []
+            block_indices = [block_index]
+            pointer = BLOCK_SIZE
+            while pointer < len(blob):
+                next_block_idx = self.io.get_last_block_index() + len(block_indices)
+                new_section = blob[pointer : pointer + BLOCK_SIZE - 4]
+
+                sections.append(new_section)
+                block_indices.append(next_block_idx)
+                pointer += BLOCK_SIZE - 4
+
+            block_indices.append(0)
+            for i, section in enumerate(sections):
+                blocks.append(struct.pack("<I", block_indices[i + 2]) + section)
+            for i, block in enumerate(blocks):
+                self.io.write(block_indices[i], block)
+        else:
+            self.io.write(block_index, blob)
 
     def _read_node(self, block_index: int) -> BTreeNode:
         """
@@ -413,6 +487,20 @@ class BTreeIndex(Index[K]):
         height = struct.unpack("<B", block[pointer : pointer + 1])[0] - ord('0')
         pointer += 1
         pointer += 3  # padding
+        next_block = struct.unpack("<I", block[pointer : pointer + 4])[0]
+        pointer += 4
+
+        if next_block != 0:
+            # --- Spanning node ---
+            # Do not index VARCHAR guys
+            sections = []
+            current_block_idx = next_block
+            while current_block_idx != 0:
+                next_blob = self.io.read(current_block_idx)
+                sections.append(next_blob)
+                current_block_idx = struct.unpack("<I", next_blob[0:4])[0]
+            block = block + b"".join(b[4:] for b in sections)
+            pointer = 20  # after header
 
         keys: list[K] = []
         for _ in range(num_keys):
@@ -426,12 +514,12 @@ class BTreeIndex(Index[K]):
                     pointer += 4
                 elif isinstance(key_type, CharType):
                     length = key_type.length
-                    key_value = block[pointer : pointer + length]
+                    key_value = block[pointer : pointer + length].decode("utf-8").rstrip('\x00')
                     pointer += length
                 elif isinstance(key_type, VarCharType):
                     length = struct.unpack("<H", block[pointer : pointer + 2])[0]
                     pointer += 2
-                    key_value = block[pointer : pointer + length]
+                    key_value = block[pointer : pointer + length].decode("utf-8").rstrip('\x00')
                     pointer += length
                 else:
                     raise ValueError("[StorageManager] Unknown key type during deserialization")
