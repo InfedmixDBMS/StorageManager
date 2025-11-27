@@ -82,7 +82,7 @@ class StorageEngine:
 
                 if passed:
                     if data_retrieval.column:
-                        projected_row = [row[mappingCol[col]] for col in data_retrieval.column]
+                        projected_row = [row[mappingCol[col][0]] for col in data_retrieval.column]
                         res.append(projected_row)
                     else:
                         res.append(row)
