@@ -7,7 +7,7 @@ The main class that other components will call. Contains the storage engine clas
 from classes.IO import IO
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
-from classes.DataModels import Schema
+from classes.DataModels import Schema,Rows
 from classes.globals import CATALOG_FILE, BLOCK_SIZE, STATS_BASE_PATH
 from typing import Dict, Iterator
 import json
@@ -15,6 +15,8 @@ import operator
 import os
 import tempfile
 import shutil
+from typing import Any
+import struct
 
 class StorageEngine:
     operation_funcs : Dict = {
@@ -26,45 +28,69 @@ class StorageEngine:
         Operation.LTE: operator.le,
     }
 
-    def read_block(self, data_retrieval: DataRetrieval) -> list[list]:
-        table: str = data_retrieval.table
+    def read_block(data_retrieval: DataRetrieval) -> Rows:
+        table = data_retrieval.table
         io = IO(table)
         serializer = Serializer()
         serializer.load_schema(table)
 
-        mappingCol = self.__create_column_mapping(serializer.schema["columns"])
-        res: list[list] = []  
+        mappingCol = StorageEngine.__create_column_mapping(serializer.schema["columns"])
+        all_columns = [col["name"] for col in serializer.schema["columns"]]
+        res: list[list[Any]] = []
 
-        idx : int = 0
-        #TODO: Implement kalau ada index di colnya
+        block_idx_gen = StorageEngine._sequential_search(io)
 
-        while True:
-            chunk: bytes = io.read(idx)
-            if not chunk:  # EOF
-                break
+        for idx in block_idx_gen:
+            chunk = io.read(idx)
+            if not chunk:
+                continue
 
-            data = serializer.deserialize(chunk)
+            full_chunk = bytearray(chunk)
+            data = None
+
+            while True:
+                try:
+                    data = serializer.deserialize(full_chunk)
+                    break
+
+                except SerializerIncompleteBlockException as e:
+                    for _ in range(e.additional_needed_blocks):
+                        next_idx = next(block_idx_gen, None)
+                        if next_idx is None:
+                            raise RuntimeError(
+                                "Unexpected EOF while reading multi-block record"
+                            )
+
+                        full_chunk.extend(io.read(next_idx))
+
             for row in data:
-                passed : bool = True
+                passed = True
                 for condition in data_retrieval.conditions:
-                    colIdx = mappingCol[condition.column]
-                    func = self.operation_funcs[condition.operation]  
+                    colVal = mappingCol[condition.column]
+                    colIdx = colVal[0]
+                    colType = colVal[1]
+                    func = StorageEngine.operation_funcs[condition.operation]
                     operand = condition.operand
 
+                    if(colType == 'float'):
+                        b = struct.pack('!f', operand)         
+                        x = struct.unpack('!f', b)[0] 
+                        operand = x
                     if not func(row[colIdx], operand):
                         passed = False
-                        break  
+                        break
 
                 if passed:
-                    if data_retrieval.column:  #kalau pengen early projection columnya isi aj
+                    if data_retrieval.column:
                         projected_row = [row[mappingCol[col]] for col in data_retrieval.column]
                         res.append(projected_row)
                     else:
                         res.append(row)
 
-            idx += 1
-
-        return res  
+        return Rows(
+            columns=data_retrieval.column if data_retrieval.column else all_columns,
+            data=res
+        )
     
     def write_block(data_write: DataWrite) -> int:
         table: str = data_write.table
@@ -74,6 +100,8 @@ class StorageEngine:
         inserted_values : list = []
         inserted_columns : set = data_write.column
         schema_columns : list = serializer.schema["columns"]
+        inc : int = 0
+        next_row_id_in_stats = StorageEngine.get_next_row_id(table)
         for row in data_write.new_value:
             new_row : list = []
             i_idx : int = 0
@@ -86,6 +114,8 @@ class StorageEngine:
 
                 # Imputation
                 # TODO: column generator, mungkin default value atau inkremen suatu sequence
+                elif col['name'] == '__row_id':
+                    new_row.append(next_row_id_in_stats + inc)
                 elif col["name"] in ["id"]:  # Auto increment id if insert
                     # NOTE: Karena update bakal diimplementasi sebagai DELETE -> INSERT, kolom ini gaboleh ga diinsert
                     new_row.append(0)   # TODO: implement auto increment, perhaps from statistics
@@ -97,6 +127,7 @@ class StorageEngine:
                     new_row.append("")
                 sch_idx += 1
             inserted_values.append(new_row)
+            inc+=1
 
         io = IO(table)
         last_block_idx : int = 1 + io.get_last_block_index()
@@ -475,10 +506,12 @@ class StorageEngine:
 
 
     #Helper method
-    def __create_column_mapping(self,columns: list[dict]) -> dict[str, int]:
+    @staticmethod
+    def __create_column_mapping(columns: list[dict]) -> dict[str, int]:
+        print(columns)
         mapping = {}
         for i, col in enumerate(columns):
-            mapping[col["name"]] = i
+            mapping[col["name"]] = (i,col['type'])
         return mapping
 
     # def update_stats

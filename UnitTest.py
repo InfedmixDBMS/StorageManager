@@ -92,11 +92,10 @@ def test_read():
 
     # storageIO.write(0, data)
 
-    data_request : DataRetrieval = DataRetrieval("student", [], [Condition('ipk', Operation.EQ, 3.8)])
+    data_request : DataRetrieval = DataRetrieval("student", [], [Condition('ipk', Operation.GTE, 3.8)])
     res: Rows = StorageEngine.read_block(data_request)
     
-    print(res)
-    for i in range (len(res.data)):
+    for i in range (res.row_count):
         print(res.data[i])
 
 def test_write():
@@ -124,37 +123,37 @@ def test_write():
     # ]
 
     #data dibawah ini kalo write berhasil tapi,kalo read error di deserialize
-    # dummy_insert = [
-    #     [101, "Alice Wonderland", 3.8],
-    #     [102, "Bob Builder", 3.8],
-    #     [103, "Charlie Chaplin", 3.9],
-    #     [104, "David Beckham", 3.2],
-    #     [105, "Eva Green", 4.0],
-
-    #     [106, "John Doe", 3.6],
-    #     [107, "Maria Hill", 3.7],
-    #     [108, "Peter Parker", 3.5],
-    #     [109, "Tony Stark", 3.9],
-    #     [110, "Bruce Wayne", 3.4],
-    #     [111, "Clark Kent", 3.1],
-    #     [112, "Diana Prince", 3.9],
-    #     [113, "Barry Allen", 3.3],
-    #     [114, "Arthur Curry", 3.2],
-    #     [115, "Natasha Romanoff", 3.8],
-    #     [116, "Steve Rogers", 3.7],
-    #     [117, "Wanda Maximoff", 3.9],
-    #     [118, "Stephen Strange", 3.5]
-    # ]
-
-    #data ini memang berhasil write tapi entah kenapa dia jadi gagal read block kalo writeny dari storage engine
-    #sementara kalo langsung dari IO bisa
     dummy_insert = [
         [101, "Alice Wonderland", 3.8],
         [102, "Bob Builder", 3.8],
         [103, "Charlie Chaplin", 3.9],
         [104, "David Beckham", 3.2],
-        [105, "Eva Green", 4.0]
+        [105, "Eva Green", 4.0],
+
+        [106, "John Doe", 3.6],
+        [107, "Maria Hill", 3.7],
+        [108, "Peter Parker", 3.5],
+        [109, "Tony Stark", 3.9],
+        [110, "Bruce Wayne", 3.4],
+        [111, "Clark Kent", 3.1],
+        [112, "Diana Prince", 3.9],
+        [113, "Barry Allen", 3.3],
+        [114, "Arthur Curry", 3.2],
+        [115, "Natasha Romanoff", 3.8],
+        [116, "Steve Rogers", 3.7],
+        [117, "Wanda Maximoff", 3.9],
+        [118, "Stephen Strange", 3.5]
     ]
+
+    #data ini memang berhasil write tapi entah kenapa dia jadi gagal read block kalo writeny dari storage engine
+    #sementara kalo langsung dari IO bisa
+    # dummy_insert = [
+    #     [101, "Alice Wonderland", 3.8],
+    #     [102, "Bob Builder", 3.8],
+    #     [103, "Charlie Chaplin", 3.9],
+    #     [104, "David Beckham", 3.2],
+    #     [105, "Eva Green", 4.0]
+    # ]
  
     data_request : DataWrite = DataWrite(
         "student",
