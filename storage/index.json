@@ -1,6 +1,6 @@
 {
-  "student_id_BTREE": {
-    "file_path": "storage/data/student_id_BTREE.idx",
+  "student_id_BTREE.idx": {
+    "file_path": "storage/data/student_id_BTREE.idx.dat",
     "table": "student",
     "columns": [
       "id"
@@ -11,8 +11,8 @@
     "unique": true,
     "type": "BTREE"
   },
-  "course_description_BTREE": {
-    "file_path": "storage/data/course_description_BTREE.idx",
+  "course_description_BTREE.idx": {
+    "file_path": "storage/data/course_description_BTREE.idx.dat",
     "table": "course",
     "columns": [
       "description"
@@ -23,8 +23,8 @@
     "unique": false,
     "type": "BTREE"
   },
-  "course_id_BTREE": {
-    "file_path": "storage/data/course_id_BTREE.idx",
+  "course_id_BTREE.idx": {
+    "file_path": "storage/data/course_id_BTREE.idx.dat",
     "table": "course",
     "columns": [
       "id"

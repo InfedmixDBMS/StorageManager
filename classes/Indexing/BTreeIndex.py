@@ -176,8 +176,8 @@ class BTreeNode:
         return left_node, middle_key, right_node
 
 class BTreeIndex(Index[K]):
-    def __init__(self, file_path: str, table: str, columns: list[str], key_type: tuple[DataType], unique: bool, **kwargs):
-        super().__init__(file_path=file_path, table=table, columns=columns, key_type=key_type, unique=unique, **kwargs)
+    def __init__(self, index_name: str, file_path: str, table: str, columns: list[str], key_type: tuple[DataType], unique: bool, **kwargs):
+        super().__init__(index_name=index_name, file_path=file_path, table=table, columns=columns, key_type=key_type, unique=unique, **kwargs)
         self.root_block_index: int = 0
         self.root: BTreeNode | None = None  # Store in memory
     
@@ -203,7 +203,7 @@ class BTreeIndex(Index[K]):
         # -------- Leaf --------
         node = nodes_stack[-1]
         if not node.insert_key(entry, entry.pointer):   # Unique violation
-            return False
+            raise UniqueIndexViolationException(f"Unique index violation on table {self.table} for key {entry.key}")
 
         need_write: bool = True
         while nodes_stack and need_write:

@@ -28,7 +28,8 @@ class UniqueIndexViolationException(Exception):
         super().__init__(message)
 
 class Index(ABC, Generic[K]):
-    def __init__(self, file_path: str, table: str, columns: list[str], key_type: tuple[DataType], unique: bool, **kwargs):
+    def __init__(self, index_name: str, file_path: str, table: str, columns: list[str], key_type: tuple[DataType], unique: bool, **kwargs):
+        self.index_name: str = index_name
         self.table: str = table
         self.columns: list[str] = columns
         if isinstance(key_type, tuple):
@@ -36,7 +37,7 @@ class Index(ABC, Generic[K]):
         else:
             self.key_types: tuple[DataType] = (key_type,)
         self.unique: bool = unique
-        self.io: IO = IO(file_path)
+        self.io: IO = IO(index_name)
 
         if len(self.key_types) == 0:
             raise ValueError("[StorageManager] Key types must be specified for BTreeIndex initialization")
@@ -53,7 +54,7 @@ class Index(ABC, Generic[K]):
         pass
 
     @abstractmethod
-    def insert(self, key: K, pointer: IndexPointer) -> bool:
+    def insert(self, entry: IndexEntry[K]) -> bool:
         """ 
         Insert entry ke index
         Params:
@@ -64,7 +65,7 @@ class Index(ABC, Generic[K]):
         pass
 
     @abstractmethod
-    def delete(self, key: K, specific_entry_pointer: IndexPointer | None = None) -> bool:
+    def delete(self, entry: IndexEntry[K]) -> bool:
         """
         Delete semua entry dengan key tertentu dari index.
         Params:

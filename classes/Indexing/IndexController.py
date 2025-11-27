@@ -1,5 +1,6 @@
 import os
 import json
+from classes.IO import IO
 from classes.globals import INDEX_META_FILE, DATA_STORE_PATH
 from classes.Serializer import Serializer
 from classes.Types import DataType, IntType, FloatType, CharType, VarCharType
@@ -35,7 +36,7 @@ class IndexController:
         Mengembalikan objek index yang terkait dengan table.column jika ada.
         """
         for meta_name, meta in self.index_schema.items():
-            if meta["table"] == table and column in meta["column"]:
+            if meta["table"] == table and column in meta["columns"]:
                 return self.index_map[meta_name]
         return None
 
@@ -43,14 +44,16 @@ class IndexController:
         """
         Membuat index baru pada table.column
         """
-        index_name = f"{table}_{column}_{index_type}"
-        index_file = os.path.join(DATA_STORE_PATH, f"{index_name}.idx")
+        index_name: str = f"{table}_{column}_{index_type}.idx"
+        index_file: str = ""
         if index_name in self.index_map:
             raise ValueError(f"Index {index_name} sudah ada.")
-
+    
         # Create index file
         try:
-            open(index_file, 'wb').close()
+            io: IO = IO(index_name)
+            io.create_file()
+            index_file = io.file_path
         except Exception as e:
             print(f"An error occurred while creating index file: {e}")
             raise e
@@ -76,7 +79,8 @@ class IndexController:
                     key_types.append(VarCharType(col["length"]))
                     key_types_str.append("varchar")
         if index_type == IndexType.BTREE.value:
-            index_object = BTreeIndex(file_path=index_file,
+            index_object = BTreeIndex(index_name=index_name,
+                                      file_path=index_file,
                                       table=table,
                                       columns=[column],
                                       key_type=tuple(key_types),
@@ -122,7 +126,7 @@ class IndexController:
 
             # TODO: populate self.index_map
             if type == IndexType.BTREE.value:
-                self.index_map[index_name] = BTreeIndex(**meta)
+                self.index_map[index_name] = BTreeIndex(index_name=index_name, **meta)
             elif type == IndexType.HASH.value:
                 pass
             else:
