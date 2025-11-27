@@ -79,7 +79,20 @@ class StorageEngine:
                     colVal = mappingCol[condition.column]
                     colIdx = colVal[0]
                     colType = colVal[1]
-                    func = StorageEngine.operation_funcs[condition.operation]
+                    # func = StorageEngine.operation_funcs[condition.operation]
+                    op = condition.operation
+                    try:
+                        if isinstance(op, str):
+                            op = Operation(op)
+                        elif not isinstance(op, Operation):
+                            # If it's already an enum but somehow not working, use its value
+                            op = Operation(op.value) if hasattr(op, 'value') else op
+                    except Exception as e:
+                        print(f"[DEBUG API] Error converting operation: {op}, type={type(op)}, error={e}")
+                        raise
+                    
+                    func = StorageEngine.operation_funcs[op]
+
                     operand = condition.operand
 
                     if(colType == 'float'):
@@ -249,7 +262,21 @@ class StorageEngine:
                     x = struct.unpack('!f', b)[0] 
                     operand = x
 
-                func = StorageEngine.operation_funcs[condition.operation]
+                # func = StorageEngine.operation_funcs[condition.operation]
+
+                op = condition.operation
+                try:
+                    if isinstance(op, str):
+                        op = Operation(op)
+                    elif not isinstance(op, Operation):
+                        # If it's already an enum but somehow not working, use its value
+                        op = Operation(op.value) if hasattr(op, 'value') else op
+                except Exception as e:
+                    print(f"[DEBUG API] Error converting operation: {op}, type={type(op)}, error={e}")
+                    raise
+                
+                func = StorageEngine.operation_funcs[op]                
+
                 for irow, row in enumerate(rows):
                     if flag_delete[irow]:
                         continue
