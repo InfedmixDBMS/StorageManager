@@ -1,3 +1,4 @@
+import operator
 from typing import Any, List, Generic, TypeVar, Dict
 from enum import Enum
 from math import ceil
@@ -118,3 +119,12 @@ class Statistic:
 
     def __repr__(self) -> str:
         return self.__str__()
+
+OPERATION_FUNCS : Dict = {
+    Operation.EQ: operator.eq,
+    Operation.NEQ: operator.ne,
+    Operation.GT: operator.gt,
+    Operation.GTE: operator.ge,
+    Operation.LT: operator.lt,
+    Operation.LTE: operator.le,
+}
