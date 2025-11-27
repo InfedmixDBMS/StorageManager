@@ -4,7 +4,6 @@ API.py (Working Title)
 The main class that other components will call. Contains the storage engine class as shown in spec
 """
 
-from scipy import stats
 from classes.IO import IO
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
@@ -454,7 +453,7 @@ class StorageEngine:
         lr : int = total_row_size // nr if nr > 0 else 0 # avg size of tuple
         for i, col in enumerate(serializer.schema["columns"]):
             column_name = col["name"]
-            if column_name != "__special_row_id":
+            if column_name != "__row_id":
                 v_a_r[column_name] = len(unique_values[i])
 
         stats =  {
