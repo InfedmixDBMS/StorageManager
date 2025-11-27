@@ -1,0 +1,126 @@
+import json
+from classes.Indexing.IndexController import IndexController
+from classes.Indexing.Index import IndexPointer, IndexEntry, UniqueIndexViolationException
+from classes.DataModels import Schema, Statistic, DataRetrieval, Rows, Condition,Operation, DataWrite, DataDeletion
+from classes.globals import INDEX_META_FILE
+from classes.API import StorageEngine
+
+
+
+def setup_test():
+    with open(INDEX_META_FILE, "w") as f:
+        json.dump({}, f, indent=2)
+    
+    controller = IndexController()
+    controller.set_index("student", "id", "BTREE", True)
+
+def write_on_indexed_table(reraise: bool = False) -> tuple[bool, str]:
+    dummy_insert = [
+        [101, "Alice Wonderland", 3.8],
+        [102, "Bob Builder", 3.8],
+        [103, "Charlie Chaplin", 3.9],
+        [104, "David Beckham", 3.2],
+        [105, "Eva Green", 4.0],
+
+        [106, "John Doe", 3.6],
+        [107, "Maria Hill", 3.7],
+        [108, "Peter Parker", 3.5],
+        [109, "Tony Stark", 3.9],
+        [110, "Bruce Wayne", 3.4],
+        [111, "Clark Kent", 3.1],
+        [112, "Diana Prince", 3.9],
+        [113, "Barry Allen", 3.3],
+        [114, "Arthur Curry", 3.2],
+        [115, "Natasha Romanoff", 3.8],
+        [116, "Steve Rogers", 3.7],
+        [117, "Wanda Maximoff", 3.9],
+        [118, "Stephen Strange", 3.5]
+    ]
+
+    data_request : DataWrite = DataWrite(
+        "student",
+        ["id","name","ipk"],
+        [],
+        dummy_insert
+    )
+
+    try:
+        StorageEngine.write_block(data_request)
+        return True, ""
+    except Exception as e:
+        if reraise:
+            raise e
+        return False, f"Exception occurred: {e}"
+
+def write_duplicate_on_unique_index(reraise: bool = False) -> tuple[bool, str]:
+    dummy_insert = [
+        [201, "Alice Wonderland", 3.8],
+        [202, "Bob Builder", 3.8],
+        [203, "Charlie Chaplin", 3.9],
+        [204, "David Beckham", 3.2],
+        [205, "Eva Green", 4.0],
+        [201, "Duplicate Alice", 3.5]  # Duplicate primary key
+    ]
+
+    data_request : DataWrite = DataWrite(
+        "student",
+        ["id","name","ipk"],
+        [],
+        dummy_insert
+    )
+
+    try:
+        StorageEngine.write_block(data_request)
+        return False, "Expected exception for duplicate key, but write succeeded."
+    except UniqueIndexViolationException as e:
+        return True, ""
+    except Exception as e:
+        if reraise:
+            raise e
+        return False, f"Unexpected exception occurred: {e}"
+
+def delete_on_indexed_table(reraise: bool = False) -> tuple[bool, str]:
+    data_request : DataDeletion = DataDeletion(
+        "student",
+        [
+            Condition(
+                column="id",
+                operation=Operation.EQ,
+                operand=102
+            )
+        ]
+    )
+
+    try:
+        StorageEngine.delete_block(data_request)
+        return True, ""
+    except Exception as e:
+        if reraise:
+            raise e
+        return False, f"Exception occurred: {e}"
+
+def test_all():
+    def test(success: bool, message: str) -> str:
+        test.counter += 1
+        if success:
+            test.success += 1
+            return f"TEST {test.counter} SUCCESS {message}"
+        else:
+            return f"TEST {test.counter} FAILED {message}"
+
+    setup_test()
+    test.counter = 0
+    test.success = 0
+    messages = []
+    messages.append(test(*write_on_indexed_table()))
+    messages.append(test(*write_duplicate_on_unique_index()))
+    messages.append(test(*delete_on_indexed_table()))
+
+    print("=== INTEGRATION TESTING: Indexing with API ===")
+    for message in messages:
+        print(message)
+
+    print(f"{test.success}/{len(messages)} tests passed.")
+
+if __name__ == "__main__":
+    test_all()

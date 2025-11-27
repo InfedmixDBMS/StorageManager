@@ -8,6 +8,8 @@ from classes.IO import IO
 from classes.Serializer import Serializer, SerializerIncompleteBlockException
 from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition, Statistic, Operation
 from classes.DataModels import Schema,Rows
+from classes.Indexing.IndexController import IndexController
+from classes.Indexing.Index import Index, IndexPointer, IndexEntry, UniqueIndexViolationException
 from classes.globals import CATALOG_FILE, BLOCK_SIZE, STATS_BASE_PATH
 from typing import Dict, Iterator
 import json
@@ -128,6 +130,16 @@ class StorageEngine:
                 sch_idx += 1
             inserted_values.append(new_row)
             inc+=1
+        
+        # Index pada tabel terkait
+        index_controller: IndexController = IndexController()
+        indices: list[tuple[int, Index]] = []
+        for idx, col in enumerate(serializer.schema["columns"]):
+            # NOTE: index hanya untuk satu kolom saat ini
+            col_name = col["name"]
+            index = index_controller.get_index_for_table_column(table, col_name)
+            if index is not None:
+                indices.append((idx, index))
 
         io = IO(table)
         last_block_idx : int = 1 + io.get_last_block_index()
@@ -137,22 +149,30 @@ class StorageEngine:
         block_rows : int = 0
         def flush_block():
             nonlocal last_block_idx, res, written_block_length, block, block_rows
-            
-            # TODO: Update index here
-            
-            length = io.write(last_block_idx, block)
+            length = io.write(last_block_idx, block[:BLOCK_SIZE])
             last_block_idx += length // BLOCK_SIZE   # some rows exceed block size
             res += block_rows
 
-            written_block_length = 0
-            block = b""
+            written_block_length = written_block_length - BLOCK_SIZE
+            block = block[BLOCK_SIZE:]
             block_rows = 0
         # Serialize per row: pack dalam satu blok dulu, lalu ke blok baru kalau melebihi block size
         row : int = 0
         while row < len(inserted_values):
             serialized_data : bytes = serializer.serialize([inserted_values[row]])
             serialized_data_length : int = len(serialized_data)
-            # TODO: Check for unique/primary key constraint violation here with index
+            
+            # === Insert index
+            for col_idx, index in indices:
+                key = (inserted_values[row][col_idx],)
+                pointer = IndexPointer(block_idx=last_block_idx, offset=written_block_length)
+                entry = IndexEntry(key=key, pointer=pointer)
+                try:
+                    index.insert(entry)
+                except UniqueIndexViolationException as e:
+                    # Harusnya dirollback jika bahkan ada satu yang duplikat
+                    print(f"{e}. Abort")
+                    raise e
 
             if written_block_length + serialized_data_length > BLOCK_SIZE:
                 flush_block()
@@ -182,8 +202,17 @@ class StorageEngine:
         serializer.load_schema(table)
         mappingCol = StorageEngine.__create_column_mapping(serializer.schema["columns"])
 
-        res : int = 0
+        # Index pada tabel terkait
+        index_controller: IndexController = IndexController()
+        indices: list[tuple[int, Index]] = []
+        for idx, col in enumerate(serializer.schema["columns"]):
+            # NOTE: index hanya untuk satu kolom saat ini
+            col_name = col["name"]
+            index = index_controller.get_index_for_table_column(table, col_name)
+            if index is not None:
+                indices.append((idx, index))
         
+        res : int = 0
         # TODO: Algorithm beda kalau ada indeks
         block_idx_gen = StorageEngine._sequential_search(io)
         idx = next(block_idx_gen, None)
@@ -218,7 +247,16 @@ class StorageEngine:
                     if func(row[colIdx],operand):
                         flag_delete[irow] = True
 
-            # TODO: Update index
+            # === Delete index
+            for i in range(len(rows)):
+                if not flag_delete[i]:
+                    continue
+                for col_idx, index in indices:
+                    # TODO: kalau non-unique index, harus tau block_idx dan offsetnya juga
+                    key = (rows[i][col_idx],)
+                    pointer = None  
+                    entry = IndexEntry(key=key, pointer=pointer)
+                    index.delete(entry)
             
             new_rows = []
             for irow, row in enumerate(rows):
@@ -232,9 +270,9 @@ class StorageEngine:
         return res
 
 
-    def set_index(table: str, column:str, index_type: str) -> None:
-        pass
-
+    def set_index(table: str, column:str, index_type: str, unique: bool = False) -> None:
+        controller: IndexController = IndexController()
+        controller.set_index(table, column, index_type, unique)
 
     # TODO: create sama drop masih soft delete (fileny gak di delete)
     # TODO: ini gatau bakal jadi pake class Schema atau enggak
