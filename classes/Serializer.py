@@ -20,8 +20,17 @@ class Serializer:
         """
             Loads a schema from json file into the schema attribute based on table name
         """
-        self.schema = self.json[table_name]
-        print(self.schema)
+        user_schema = self.json[table_name].copy()
+
+        row_column = {
+            "name": "__row_id", 
+            "type": "int",
+            "length": 2,
+            "system": True
+        }
+
+        self.schema = user_schema
+        self.schema['columns'] = [row_column] + user_schema['columns']
 
 
 
@@ -68,7 +77,7 @@ class Serializer:
                     if len(packed_value) > column_length:
                         packed_value = packed_value[:column_length]
                     else:
-                        packed_value = packed_value.ljust(column_length, '\x00')
+                        packed_value = packed_value.ljust(column_length, b'\x00')
                     
                     prepared_values.append(packed_value)
                 
@@ -103,7 +112,7 @@ class Serializer:
         header_size : int = struct.calcsize(ROW_HEADER)
 
         while pointer < len(raw_data):
-        # === HEADER PROCESSING
+            # === HEADER PROCESSING
             if pointer + header_size > len(raw_data):
                 missing = pointer + header_size - len(raw_data)
                 needed_blocks = (missing + BLOCK_SIZE - 1) // BLOCK_SIZE
@@ -111,18 +120,23 @@ class Serializer:
 
             tuple_header : bytes = raw_data[pointer : pointer+header_size]
             delete_flag, tuple_length = struct.unpack(ROW_HEADER, tuple_header)
+            
+            if delete_flag == b'\x00' and tuple_length == 0: # Likely padding
+                break
+
             pointer += header_size
 
-            if delete_flag == b"D" or delete_flag == b'\x00':
+            if delete_flag == b"D":
                 pointer += tuple_length
                 continue
 
-        # === BODY PROCESSING
+            # === BODY PROCESSING
             if pointer + tuple_length > len(raw_data):
                 missing = pointer + tuple_length - len(raw_data)
                 needed_blocks = (missing + BLOCK_SIZE - 1) // BLOCK_SIZE
                 raise SerializerIncompleteBlockException(needed_blocks)
 
+            # TODO: ganti pake struct.unpack_from(format, buffer, offset)
             tuple_data : bytes = raw_data[pointer : pointer+tuple_length]
             pointer += tuple_length
 
@@ -159,17 +173,31 @@ class Serializer:
                 byte_offset.append(pointer - tuple_length - header_size)
         return data
     
+    # TODO: ini mungkin nanti diganti pake ukuran yang ada di HEADER, jadi ga perlu ngitung2 lagi.
+    # Cata kerjanya mungking di class Tuple ditambahin atribut baru
+    def get_row_size(self, row: list) -> int:
+        size : int = struct.calcsize(ROW_HEADER)
+        for col, value in zip(self.schema['columns'], row):
+            if col['type'] == 'int':
+                size += 4
+            elif col['type'] == 'float':
+                size += 4
+            elif col['type'] == 'char':
+                size += col['length']
+            elif col['type'] == 'varchar':
+                size += 2 + len(str(value).encode('utf-8'))
+        return size
 
 if __name__ == "__main__":
     s = Serializer()
-    s.load_schema("mahasiswa")
+    s.load_schema("student")
     io = IO(s.schema["file_path"])
 
     dummy = [
-        [2147483647, "Alif", "13523045", 2.3],
-        [2147483647, "Alif", "13523045", 2.3],
-        [2147483647, "Alif", "13523045", 2.3],
-        [2147483647, "Alif", "13523045", 2.3],
+        [13523045, "Alif", 2.3],
+        [13523046, "Bas", 2.3],
+        [13523047, "Cep", 2.3],
+        [13523048, "Don", 2.3],
         ]
 
     data = s.serialize(dummy)
