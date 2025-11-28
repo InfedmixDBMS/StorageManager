@@ -38,77 +38,128 @@ class StorageEngine:
         return [col['name'] for col in serializer.schema['columns']]
 
     @staticmethod
-    def read_block(data_retrieval: DataRetrieval) -> list[list]:
+    # list conditions dalam data retrieval panjang hanya 1 kalau ngga rusak ini
+    def read_block(data_retrieval: DataRetrieval) -> Rows:
         table: str = data_retrieval.table
         io = IO(table)
         serializer = Serializer()
         serializer.load_schema(table)
+        ic : IndexController = IndexController()
 
         mappingCol = StorageEngine.__create_column_mapping(serializer.schema["columns"])
         all_columns = [col["name"] for col in serializer.schema["columns"]]
         res: list[list[Any]] = []
-
         block_idx_gen = StorageEngine._sequential_search(io)
 
-        for idx in block_idx_gen:
-            chunk = io.read(idx)
-            if not chunk:
-                continue
+        idx_list: list[tuple[Condition, Index]] = []
+        there_is_index = False
+        for condition in data_retrieval.conditions:
+            a = ic.get_index_for_table_column(table, condition.column)
+            if a:
+                there_is_index = True
+            idx_list.append((condition, a))
 
-            full_chunk = bytearray(chunk)
-            data = None
+        if(there_is_index):
+            print('baca pake index')
+            block_offset_mapping : Dict[int, list[int]]= {}
+            unhandled_condition : list[Condition] = []
+            data_in_block : list[list]= None
 
-            while True:
-                try:
-                    data = serializer.deserialize(full_chunk)
-                    break
+            for condition, index in idx_list:
+                if(index):
+                    it : Iterator[IndexEntry] = index.search_condition(condition)
+                    for idx_entry in it:
+                        idx_pointer = idx_entry.pointer
+                        block_idx = idx_pointer.block_idx
+                        offset = idx_pointer.offset
+                        block_offset_mapping.setdefault(block_idx, []).append(offset)
+                else:
+                    unhandled_condition.append(condition)
 
-                except SerializerIncompleteBlockException as e:
-                    for _ in range(e.additional_needed_blocks):
-                        next_idx = next(block_idx_gen, None)
-                        if next_idx is None:
-                            raise RuntimeError(
-                                "Unexpected EOF while reading multi-block record"
-                            )
+            for block_idx, list_offset in block_offset_mapping.items():
+                raw_data_in_block : bytearray = io.read(block_idx)
+                list_offset_in_block : list[int] = []
 
-                        full_chunk.extend(io.read(next_idx))
-
-            for row in data:
-                passed = True
-                for condition in data_retrieval.conditions:
-                    colVal = mappingCol[condition.column]
-                    colIdx = colVal[0]
-                    colType = colVal[1]
-                    # func = StorageEngine.operation_funcs[condition.operation]
-                    op = condition.operation
+                while True:
                     try:
-                        if isinstance(op, str):
-                            op = Operation(op)
-                        elif not isinstance(op, Operation):
-                            # If it's already an enum but somehow not working, use its value
-                            op = Operation(op.value) if hasattr(op, 'value') else op
-                    except Exception as e:
-                        print(f"[DEBUG API] Error converting operation: {op}, type={type(op)}, error={e}")
-                        raise
-                    
-                    func = StorageEngine.operation_funcs[op]
+                        data_in_block = serializer.deserialize(raw_data_in_block, list_offset_in_block)
+                        break
+                    except SerializerIncompleteBlockException as e:
+                        for _ in range(e.additional_needed_blocks):
+                            next_idx = next(block_idx_gen, None)
+                            if next_idx is None:
+                                raise RuntimeError(
+                                    "Unexpected EOF while reading multi-block record"
+                                )
 
-                    operand = condition.operand
+                            raw_data_in_block.extend(io.read(next_idx))
 
-                    if(colType == 'float'):
-                        b = struct.pack('!f', operand)         
-                        x = struct.unpack('!f', b)[0] 
-                        operand = x
-                    if not func(row[colIdx], operand):
-                        passed = False
+                data_index : list[int] = [i for i,idx in enumerate(list_offset_in_block) if idx in list_offset]
+
+                for i in data_index:
+                    res.append(data_in_block[i])
+
+        else:
+
+            for idx in block_idx_gen:
+                chunk = io.read(idx)
+                if not chunk:
+                    continue
+
+                full_chunk = bytearray(chunk)
+                data = None
+
+                while True:
+                    try:
+                        data = serializer.deserialize(full_chunk)
                         break
 
-                if passed:
-                    if data_retrieval.column:
-                        projected_row = [row[mappingCol[col][0]] for col in data_retrieval.column]
-                        res.append(projected_row)
-                    else:
-                        res.append(row)
+                    except SerializerIncompleteBlockException as e:
+                        for _ in range(e.additional_needed_blocks):
+                            next_idx = next(block_idx_gen, None)
+                            if next_idx is None:
+                                raise RuntimeError(
+                                    "Unexpected EOF while reading multi-block record"
+                                )
+
+                            full_chunk.extend(io.read(next_idx))
+
+                for row in data:
+                    passed = True
+                    for condition in data_retrieval.conditions:
+                        colVal = mappingCol[condition.column]
+                        colIdx = colVal[0]
+                        colType = colVal[1]
+                        # func = StorageEngine.operation_funcs[condition.operation]
+                        op = condition.operation
+                        try:
+                            if isinstance(op, str):
+                                op = Operation(op)
+                            elif not isinstance(op, Operation):
+                                # If it's already an enum but somehow not working, use its value
+                                op = Operation(op.value) if hasattr(op, 'value') else op
+                        except Exception as e:
+                            print(f"[DEBUG API] Error converting operation: {op}, type={type(op)}, error={e}")
+                            raise
+                        
+                        func = StorageEngine.operation_funcs[op]
+
+                        operand = condition.operand
+
+                        if(colType == 'float'):
+                            b = struct.pack('!f', operand)         
+                            x = struct.unpack('!f', b)[0] 
+                            operand = x
+                        if not func(row[colIdx], operand):
+                            passed = False
+                            break
+
+                    if passed:
+                        if data_retrieval.column:
+                            projected_row = [row[mappingCol[col][0]] for col in data_retrieval.column]
+                            res.append(projected_row)
+                        else:
+                            res.append(row)
 
         return Rows(
             columns=data_retrieval.column if data_retrieval.column else all_columns,
