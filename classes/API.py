@@ -130,13 +130,11 @@ class StorageEngine:
                         colVal = mappingCol[condition.column]
                         colIdx = colVal[0]
                         colType = colVal[1]
-                        # func = StorageEngine.operation_funcs[condition.operation]
                         op = condition.operation
                         try:
                             if isinstance(op, str):
                                 op = Operation(op)
                             elif not isinstance(op, Operation):
-                                # If it's already an enum but somehow not working, use its value
                                 op = Operation(op.value) if hasattr(op, 'value') else op
                         except Exception as e:
                             print(f"[DEBUG API] Error converting operation: {op}, type={type(op)}, error={e}")
@@ -186,14 +184,9 @@ class StorageEngine:
                 if i_idx < len(inserted_columns) and col["name"] == inserted_columns[i_idx]:  # Provided column
                     new_row.append(row[i_idx])
                     i_idx += 1
-
                 # Imputation
-                # TODO: column generator, mungkin default value atau inkremen suatu sequence
                 elif col['name'] == '__row_id':
                     new_row.append(next_row_id_in_stats + inc)
-                elif col["name"] in ["id"]:  # Auto increment id if insert
-                    # NOTE: Karena update bakal diimplementasi sebagai DELETE -> INSERT, kolom ini gaboleh ga diinsert
-                    new_row.append(0)   # TODO: implement auto increment, perhaps from statistics
                 elif col["type"] == "int":
                     new_row.append(0)
                 elif col["type"] == "float":
@@ -313,14 +306,12 @@ class StorageEngine:
                     x = struct.unpack('!f', b)[0] 
                     operand = x
 
-                # func = StorageEngine.operation_funcs[condition.operation]
 
                 op = condition.operation
                 try:
                     if isinstance(op, str):
                         op = Operation(op)
                     elif not isinstance(op, Operation):
-                        # If it's already an enum but somehow not working, use its value
                         op = Operation(op.value) if hasattr(op, 'value') else op
                 except Exception as e:
                     print(f"[DEBUG API] Error converting operation: {op}, type={type(op)}, error={e}")
