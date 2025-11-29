@@ -59,11 +59,9 @@ class BTreeNode:
             Melakukan binary search pada key untuk mencari key yang sesuai
         """
         if disambiguator is not None:
-            # Shorter tuple is less than longer tuple if all preceding elements are equal
             key = key + (disambiguator.block_idx, disambiguator.offset)
         elif not self.is_unique and self.is_leaf and self.num_keys > 0:
             # For non-unique leaf nodes, pad search key with minimal values to ensure correct comparison
-            # This prevents (101,) from being less than (101, 12, 50)
             # Internal nodes already have discriminators in their keys
             first_key = self.get_key(0)
             if len(key) < len(first_key):
@@ -111,15 +109,25 @@ class BTreeNode:
             return self.get_pointer(i)
 
     def insert_key(self, entry: IndexEntry[K], pointer: int | IndexPointer) -> bool:
-        key = entry.key
-        if not self.is_unique:
-            key = key + (entry.pointer.block_idx, entry.pointer.offset)
+        # Default case
+        comparison_key = entry.key
+        storage_key = entry.key
+
+        # Non-unique Leaf insertion case
+        if not self.is_unique and isinstance(pointer, IndexPointer):
+            comparison_key = entry.key + (pointer.block_idx, pointer.offset)
+            storage_key = entry.key  # Store pure key for leaves
+        
+        # Binary search using comparison_key
         insert_pos = 0
-        while insert_pos < self.num_keys and self.get_key(insert_pos) < key:
+        while insert_pos < self.num_keys and self.get_key(insert_pos) < comparison_key:
             insert_pos += 1
-        if self.is_unique and insert_pos < self.num_keys and self.get_key(insert_pos) == key:
-            return False  # unique violation
-        self.keys.insert(insert_pos, entry.key)
+        
+        # Check unique violation
+        if self.is_unique and insert_pos < self.num_keys and self.get_key(insert_pos) == comparison_key:
+            return False
+        
+        self.keys.insert(insert_pos, storage_key)
         self.pointers.insert(insert_pos + 1, pointer)
         self.num_keys += 1
         return True
@@ -146,8 +154,6 @@ class BTreeNode:
 
     def split(self) -> tuple["BTreeNode", IndexEntry[K], "BTreeNode"]:
         """
-        Split this node into two nodes using right-biased strategy.
-        Right-biased: prefers putting more keys in the right node.
         Returns a tuple: (left_node, middle_key, right_node)
         """
         mid = math.ceil((self.num_keys - 1) / 2)  # Right-biased split
@@ -228,14 +234,14 @@ class BTreeIndex(Index[K]):
         if not node.insert_key(entry, entry.pointer):   # Unique violation
             raise UniqueIndexViolationException(f"Unique index violation on table {self.table} for key {entry.key}")
 
-        # Check overflow using order-based approach (predictable capacity)
+        # Check overflow using order
         need_write: bool = True
         while nodes_stack and need_write:
-            # Check if node exceeds order threshold BEFORE writing
+            # Check if node exceeds order threshol before writing
             overflow_key: bool = nodes_stack[-1].num_keys >= self.order
             
             if not overflow_key:
-                # Node fits within order, safe to write
+                # Safe to write
                 self._write_through_node(idx_stack[-1], nodes_stack[-1])
                 break
             
@@ -265,10 +271,6 @@ class BTreeIndex(Index[K]):
                     height=nodes_stack[-1].height + 1,
                     is_unique=self.unique
                 )
-                if not self.unique and right_node.is_leaf: 
-                    # First height increase. Update root key with disctiminator
-                    right_pointer = right_node.get_pointer(0)
-                    root_node.keys[0] = root_node.keys[0] + (right_pointer.block_idx, right_pointer.offset)
                 self._write_through_node(self.root_block_index, root_node)
                 self.root = root_node
                 need_write = False
@@ -282,33 +284,11 @@ class BTreeIndex(Index[K]):
                 right_node.parent_node = nodes_stack[-1].parent_node
 
                 # Pop the split child from stacks
-                split_child_idx = idx_stack.pop()
+                idx_stack.pop()
                 nodes_stack.pop()
-
-                # Find position of split child's pointer in parent
+                
                 parent = nodes_stack[-1]
-                child_ptr_pos = -1
-                for i, ptr in enumerate(parent.pointers):
-                    if ptr == split_child_idx:
-                        child_ptr_pos = i
-                        break
-                
-                if child_ptr_pos == -1:
-                    print(f"DEBUG: Trying to find {split_child_idx} in parent pointers {parent.pointers}")
-                    raise ValueError(f"Split child pointer {split_child_idx} not found in parent")
-                
-                # Update parent structure after child split:
-                # The split child at split_child_idx becomes two nodes: left and right
-                # We write left to left_block_idx (same as split_child_idx)
-                # We write right to right_block_idx (new block)
-                # Parent needs: pointer to left stays at child_ptr_pos, add separator + right pointer
-                # The parent pointer already points to split_child_idx, which is now left_block_idx
-                # Since left_block_idx == split_child_idx, no need to update it
-                # Just insert separator and right pointer after it
-                parent.pointers.insert(child_ptr_pos + 1, right_block_idx)
-                parent.keys.insert(child_ptr_pos, middle_entry.key)
-                parent.num_keys += 1
-                
+                parent.insert_key(middle_entry, right_block_idx)
                 need_write = True
 
             try:
