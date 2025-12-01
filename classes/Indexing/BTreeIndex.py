@@ -1,4 +1,5 @@
 import struct
+import math
 from typing import Iterator, TypeVar
 from dataclasses import dataclass
 from classes.DataModels import Condition, Operation, OPERATION_FUNCS
@@ -58,8 +59,14 @@ class BTreeNode:
             Melakukan binary search pada key untuk mencari key yang sesuai
         """
         if disambiguator is not None:
-            # Shorter tuple is less than longer tuple if all preceding elements are equal
             key = key + (disambiguator.block_idx, disambiguator.offset)
+        elif not self.is_unique and self.is_leaf and self.num_keys > 0:
+            # For non-unique leaf nodes, pad search key with minimal values to ensure correct comparison
+            # Internal nodes already have discriminators in their keys
+            first_key = self.get_key(0)
+            if len(key) < len(first_key):
+                # Pad with 0s for comparison (assumes block_idx/offset are non-negative)
+                key = key + (0, 0)
 
         # self.get_key(i) <= key < self.get_key(j)
         # with i+1 == j
@@ -90,18 +97,37 @@ class BTreeNode:
                 i = mid + 1
             else:
                 j = mid - 1
-        return self.get_pointer(j)
+        
+        # After binary search: find largest index where keys[idx] <= key, then return pointer[idx+1]
+        # The loop maintains keys[i] <= key < keys[j] but may exit with i+1 == j or i+1 < j
+        if key >= self.get_key(j):
+            return self.get_pointer(j + 1)
+        elif key >= self.get_key(i):
+            return self.get_pointer(i + 1)
+        else:
+            # Shouldn't happen given boundary checks, but return pointer[i] as fallback
+            return self.get_pointer(i)
 
     def insert_key(self, entry: IndexEntry[K], pointer: int | IndexPointer) -> bool:
-        key = entry.key
-        if not self.is_unique:
-            key = key + (entry.pointer.block_idx, entry.pointer.offset)
+        # Default case
+        comparison_key = entry.key
+        storage_key = entry.key
+
+        # Non-unique Leaf insertion case
+        if not self.is_unique and isinstance(pointer, IndexPointer):
+            comparison_key = entry.key + (pointer.block_idx, pointer.offset)
+            storage_key = entry.key  # Store pure key for leaves
+        
+        # Binary search using comparison_key
         insert_pos = 0
-        while insert_pos < self.num_keys and self.get_key(insert_pos) < key:
+        while insert_pos < self.num_keys and self.get_key(insert_pos) < comparison_key:
             insert_pos += 1
-        if self.is_unique and insert_pos < self.num_keys and self.get_key(insert_pos) == key:
-            return False  # unique violation
-        self.keys.insert(insert_pos, entry.key)
+        
+        # Check unique violation
+        if self.is_unique and insert_pos < self.num_keys and self.get_key(insert_pos) == comparison_key:
+            return False
+        
+        self.keys.insert(insert_pos, storage_key)
         self.pointers.insert(insert_pos + 1, pointer)
         self.num_keys += 1
         return True
@@ -128,10 +154,9 @@ class BTreeNode:
 
     def split(self) -> tuple["BTreeNode", IndexEntry[K], "BTreeNode"]:
         """
-        Split this node into two nodes.
         Returns a tuple: (left_node, middle_key, right_node)
         """
-        mid = self.num_keys // 2
+        mid = math.ceil((self.num_keys - 1) / 2)  # Right-biased split
         middle_key = IndexEntry(key=self.get_key(mid), pointer=self.get_pointer(mid) if self.is_leaf else None)
 
         if self.is_leaf:
@@ -180,6 +205,10 @@ class BTreeIndex(Index[K]):
         super().__init__(index_name=index_name, file_path=file_path, table=table, columns=columns, key_type=key_type, unique=unique, **kwargs)
         self.root_block_index: int = 0
         self.root: BTreeNode | None = None  # Store in memory
+        
+        # Calculate conservative order based on worst-case key sizes
+        self.order: int = self._calculate_max_order()
+        self.min_keys: int = math.ceil(self.order / 2) - 1
     
     def load_metadata(self):
         self._read_index_metadata()
@@ -205,14 +234,15 @@ class BTreeIndex(Index[K]):
         if not node.insert_key(entry, entry.pointer):   # Unique violation
             raise UniqueIndexViolationException(f"Unique index violation on table {self.table} for key {entry.key}")
 
+        # Check overflow using order
         need_write: bool = True
         while nodes_stack and need_write:
-            overflow_key: bool = False
-            try:
-                self._write_through_node(idx_stack[-1], nodes_stack[-1])
-            except BTreeInsertedMaxKeyException:
-                overflow_key = True
+            # Check if node exceeds order threshol before writing
+            overflow_key: bool = nodes_stack[-1].num_keys >= self.order
+            
             if not overflow_key:
+                # Safe to write
+                self._write_through_node(idx_stack[-1], nodes_stack[-1])
                 break
             
             left_block_idx: int = -1
@@ -241,10 +271,6 @@ class BTreeIndex(Index[K]):
                     height=nodes_stack[-1].height + 1,
                     is_unique=self.unique
                 )
-                if not self.unique and right_node.is_leaf: 
-                    # First height increase. Update root key with disctiminator
-                    right_pointer = right_node.get_pointer(0)
-                    root_node.keys[0] = root_node.keys[0] + (right_pointer.block_idx, right_pointer.offset)
                 self._write_through_node(self.root_block_index, root_node)
                 self.root = root_node
                 need_write = False
@@ -257,10 +283,12 @@ class BTreeIndex(Index[K]):
                 left_node.parent_node = nodes_stack[-1].parent_node
                 right_node.parent_node = nodes_stack[-1].parent_node
 
-                nodes_stack.pop()
+                # Pop the split child from stacks
                 idx_stack.pop()
-
-                nodes_stack[-1].insert_key(middle_entry, right_block_idx)  # Insert to internal node should never fail ok
+                nodes_stack.pop()
+                
+                parent = nodes_stack[-1]
+                parent.insert_key(middle_entry, right_block_idx)
                 need_write = True
 
             try:
@@ -289,20 +317,280 @@ class BTreeIndex(Index[K]):
         
         # -------- Leaf --------
         node = nodes_stack[-1]
+        node_idx = idx_stack[-1]
         success = node.delete_key(entry)
-        # TODO: rebalancing nodes if underflow
 
         if not success:
             return False
-        self._write_through_node(idx_stack[-1], nodes_stack[-1])
+        
+        # Check for underflow and rebalance if needed
+        if node.num_keys < self.min_keys and not node.is_root:
+            # Get parent for underflow handling
+            parent_idx = idx_stack[-2]
+            parent = nodes_stack[-2]
+            self._handle_underflow(node_idx, node, parent_idx, parent)
+        elif node.is_root and node.num_keys == 0 and not node.is_leaf:
+            # Root empty but not leaf, promote only child as new root
+            first_child_idx = node.pointers[0]
+            first_child = self._read_node(first_child_idx)
+            first_child.is_root = True
+            first_child.parent_node = 0
+            self.root = first_child
+            self.root_block_index = first_child_idx
+            self._write_through_node(first_child_idx, first_child)
+            self._write_index_metadata()
+        else:
+            # No underflow, just write the node
+            self._write_through_node(node_idx, node)
+        
         return True
+
+    # --- UNDERFLOW HANDLING ---
+    def _update_separator_key(self, parent: BTreeNode, sep_idx: int, right_node: BTreeNode) -> None:
+        """
+        Update separator key in parent to correctly point to first key of right node.
+        Handles discriminators for non-unique indexes.
+        """
+        if right_node.is_leaf and not self.unique:
+            # Leaf non-unique: separator needs discriminated key
+            first_ptr = right_node.get_pointer(0)
+            parent.keys[sep_idx] = right_node.keys[0] + (first_ptr.block_idx, first_ptr.offset)
+        elif not right_node.is_leaf and not self.unique:
+            # Internal non-unique: get_key() already includes discriminator
+            parent.keys[sep_idx] = right_node.get_key(0)
+        else:
+            # Unique (leaf or internal): just use the key
+            parent.keys[sep_idx] = right_node.keys[0]
+
+    def _handle_underflow(self, node_idx: int, node: BTreeNode, 
+                          parent_idx: int, parent: BTreeNode) -> None:
+        """
+        Handle underflow after deletion. Tries to:
+        1. Borrow from left sibling (if it has spare keys)
+        2. Borrow from right sibling (if it has spare keys)
+        3. Merge with left sibling
+        4. Merge with right sibling
+        """
+        # Find node's position in parent
+        child_position = -1
+        for i, ptr in enumerate(parent.pointers):
+            if ptr == node_idx:
+                child_position = i
+                break
+        
+        if child_position == -1:
+            return  # Node not found in parent
+        
+        # Get siblings
+        left_sibling_idx = None
+        left_sibling = None
+        if child_position > 0:
+            left_sibling_idx = parent.pointers[child_position - 1]
+            if isinstance(left_sibling_idx, int):
+                left_sibling = self._read_node(left_sibling_idx)
+        
+        right_sibling_idx = None
+        right_sibling = None
+        if child_position < len(parent.pointers) - 1:
+            right_sibling_idx = parent.pointers[child_position + 1]
+            if isinstance(right_sibling_idx, int):
+                right_sibling = self._read_node(right_sibling_idx)
+        
+        # Try borrowing from siblings
+        if left_sibling and left_sibling.num_keys > self.min_keys:
+            self._borrow_from_left(node_idx, node, left_sibling_idx, left_sibling, 
+                                   parent_idx, parent, child_position)
+        elif right_sibling and right_sibling.num_keys > self.min_keys:
+            self._borrow_from_right(node_idx, node, right_sibling_idx, right_sibling,
+                                    parent_idx, parent, child_position)
+        # Try merging
+        elif left_sibling:
+            self._merge_nodes(left_sibling_idx, left_sibling, node_idx, node,
+                             parent_idx, parent, child_position - 1)
+        elif right_sibling:
+            self._merge_nodes(node_idx, node, right_sibling_idx, right_sibling,
+                             parent_idx, parent, child_position)
+
+    def _borrow_from_left(self, node_idx: int, node: BTreeNode,
+                          left_idx: int, left_sibling: BTreeNode,
+                          parent_idx: int, parent: BTreeNode,
+                          child_position: int) -> None:
+        """
+        Borrow the rightmost key from left sibling.
+        """
+        if node.is_leaf:
+            # Borrow rightmost key from left sibling
+            borrowed_key = left_sibling.keys.pop()
+            borrowed_ptr = left_sibling.pointers.pop()
+            left_sibling.num_keys -= 1
+            
+            # Insert at beginning of current node
+            node.keys.insert(0, borrowed_key)
+            node.pointers.insert(0, borrowed_ptr)
+            node.num_keys += 1
+            
+            # Update parent separator to point to first key of right node
+            self._update_separator_key(parent, child_position - 1, node)
+        else:
+            # Internal node: borrow key and rotate through parent
+            borrowed_key = left_sibling.keys.pop()
+            borrowed_ptr = left_sibling.pointers.pop()
+            left_sibling.num_keys -= 1
+            
+            # Parent key comes down to current node
+            parent_key = parent.keys[child_position - 1]
+            
+            # Insert parent key at beginning of current node
+            node.keys.insert(0, parent_key)
+            node.pointers.insert(0, borrowed_ptr)
+            node.num_keys += 1
+            
+            # Borrowed key goes up to parent
+            parent.keys[child_position - 1] = borrowed_key
+            
+            # Update borrowed child's parent pointer
+            if isinstance(borrowed_ptr, int):
+                borrowed_child = self._read_node(borrowed_ptr)
+                borrowed_child.parent_node = node_idx
+                self._write_through_node(borrowed_ptr, borrowed_child)
+        
+        # Write changes
+        self._write_through_node(left_idx, left_sibling)
+        self._write_through_node(node_idx, node)
+        self._write_through_node(parent_idx, parent)
+
+    def _borrow_from_right(self, node_idx: int, node: BTreeNode,
+                           right_idx: int, right_sibling: BTreeNode,
+                           parent_idx: int, parent: BTreeNode,
+                           child_position: int) -> None:
+        """
+        Borrow the leftmost key from right sibling.
+        """
+        if node.is_leaf:
+            # Borrow leftmost key from right sibling
+            borrowed_key = right_sibling.keys.pop(0)
+            borrowed_ptr = right_sibling.pointers.pop(0)
+            right_sibling.num_keys -= 1
+            
+            # Append to current node
+            node.keys.append(borrowed_key)
+            node.pointers.append(borrowed_ptr)
+            node.num_keys += 1
+            
+            # Update parent separator to point to new first key of right sibling
+            self._update_separator_key(parent, child_position, right_sibling)
+        else:
+            # Internal node: borrow key and rotate through parent
+            borrowed_key = right_sibling.keys.pop(0)
+            borrowed_ptr = right_sibling.pointers.pop(0)
+            right_sibling.num_keys -= 1
+            
+            # Parent key comes down to current node
+            parent_key = parent.keys[child_position]
+            
+            # Append parent key to current node
+            node.keys.append(parent_key)
+            node.pointers.append(borrowed_ptr)
+            node.num_keys += 1
+            
+            # Borrowed key goes up to parent
+            parent.keys[child_position] = borrowed_key
+            
+            # Update borrowed child's parent pointer
+            if isinstance(borrowed_ptr, int):
+                borrowed_child = self._read_node(borrowed_ptr)
+                borrowed_child.parent_node = node_idx
+                self._write_through_node(borrowed_ptr, borrowed_child)
+        
+        # Write changes
+        self._write_through_node(right_idx, right_sibling)
+        self._write_through_node(node_idx, node)
+        self._write_through_node(parent_idx, parent)
+
+    def _merge_nodes(self, left_idx: int, left_node: BTreeNode,
+                     right_idx: int, right_node: BTreeNode,
+                     parent_idx: int, parent: BTreeNode,
+                     separator_key_idx: int) -> None:
+        """
+        Merge right node into left node. Handles recursive underflow in parent.
+        """
+        separator_key = parent.keys[separator_key_idx]
+        
+        if left_node.is_leaf:
+            # Leaf: just concatenate keys and pointers
+            left_node.keys.extend(right_node.keys)
+            left_node.pointers.extend(right_node.pointers)
+            left_node.num_keys += right_node.num_keys
+            
+            # Update leaf chain to skip merged node
+            left_node.next_leaf = right_node.next_leaf
+        else:
+            # Internal: separator key comes down from parent
+            left_node.keys.append(separator_key)
+            left_node.keys.extend(right_node.keys)
+            left_node.pointers.extend(right_node.pointers)
+            left_node.num_keys += right_node.num_keys + 1
+            
+            # Update all moved children's parent pointers
+            for ptr in right_node.pointers:
+                if isinstance(ptr, int):
+                    child = self._read_node(ptr)
+                    child.parent_node = left_idx
+                    self._write_through_node(ptr, child)
+        
+        # Remove separator key from parent
+        parent.keys.pop(separator_key_idx)
+        parent.pointers.pop(separator_key_idx + 1)
+        parent.num_keys -= 1
+        
+        # Write merged left node
+        self._write_through_node(left_idx, left_node)
+        
+        # Check if parent underflows (recursive underflow)
+        if parent.num_keys < self.min_keys and not parent.is_root:
+            # Need to get parent's parent for recursive handling
+            grandparent_idx = parent.parent_node
+            grandparent = self._read_node(grandparent_idx)
+            self._handle_underflow(parent_idx, parent, grandparent_idx, grandparent)
+        elif parent.is_root and parent.num_keys == 0:
+            # Root is empty, promote left child as new root
+            left_node.is_root = True
+            left_node.parent_node = 0
+            self.root = left_node
+            self.root_block_index = left_idx
+            self._write_through_node(left_idx, left_node)
+            # Update metadata with new root block index
+            self._write_index_metadata()
+        else:
+            # Parent is fine, just write it
+            self._write_through_node(parent_idx, parent)
+
+    def _normalize_key(self, key: K) -> K:
+        """
+        Normalize key values through float32 serialization to match stored values.
+        FloatType uses 4-byte floats which can't exactly represent all decimal values.
+        """
+        import struct
+        from classes.Types import FloatType
+        
+        normalized = []
+        for i, val in enumerate(key):
+            if i < len(self.key_types) and isinstance(self.key_types[i], FloatType):
+                # Round-trip through float32 to match stored precision
+                normalized.append(struct.unpack('<f', struct.pack('<f', float(val)))[0])
+            else:
+                normalized.append(val)
+        return tuple(normalized)
 
     def search(self, key: K) -> Iterator[IndexEntry[K]]:
         if not self.root:
             self.root = self._read_node(self.root_block_index)
 
+        # Normalize key to match float32 precision of stored values
+        normalized_key = self._normalize_key(key)
+        
         for entry in self._search_then_scan_to_end(key):
-            if entry.key == key:
+            if entry.key == normalized_key:
                 yield entry
             else:
                 break
@@ -413,7 +701,6 @@ class BTreeIndex(Index[K]):
                 elif isinstance(key_type, CharType):
                     encoded = key[i].encode('utf-8')
                     padded = encoded.ljust(key_type.length, b'\x00')
-                    serialized_node.append(struct.pack("<H", len(encoded)))
                     serialized_node.append(padded)
                 elif isinstance(key_type, VarCharType):
                     encoded = key[i].encode('utf-8')
@@ -432,7 +719,8 @@ class BTreeIndex(Index[K]):
         if not node.is_leaf:
             for pointer in node.pointers:
                 serialized_node.append(struct.pack("<I", pointer))
-        elif node.is_leaf and self.unique:
+        elif node.is_leaf:
+            # Both unique and non-unique leaf nodes need pointers serialized
             for pointer in node.pointers:
                 serialized_node.append(struct.pack("<I", pointer.block_idx))
                 serialized_node.append(struct.pack("<H", pointer.offset))
@@ -513,9 +801,8 @@ class BTreeIndex(Index[K]):
                     key_value = struct.unpack("<f", block[pointer : pointer + 4])[0]
                     pointer += 4
                 elif isinstance(key_type, CharType):
-                    length = key_type.length
-                    key_value = block[pointer : pointer + length].decode("utf-8").rstrip('\x00')
-                    pointer += length
+                    key_value = block[pointer : pointer + key_type.length].decode("utf-8").rstrip('\x00')
+                    pointer += key_type.length
                 elif isinstance(key_type, VarCharType):
                     length = struct.unpack("<H", block[pointer : pointer + 2])[0]
                     pointer += 2
@@ -536,14 +823,16 @@ class BTreeIndex(Index[K]):
             keys.append(tuple(key_parts))  # type: ignore
 
         pointers: list[int | IndexPointer] = []
-        for _ in range(num_keys + (0 if is_leaf else 1)):
+        for i in range(num_keys + (0 if is_leaf else 1)):
             if is_leaf:
+                # Both unique and non-unique leaf nodes: read pointer from disk
                 block_idx = struct.unpack("<I", block[pointer : pointer + 4])[0]
                 pointer += 4
                 offset = struct.unpack("<H", block[pointer : pointer + 2])[0]
                 pointer += 2
                 pointers.append(IndexPointer(block_idx=block_idx, offset=offset))
             else:
+                # Internal node: read child block index
                 child_node_offset = struct.unpack("<I", block[pointer : pointer + 4])[0]
                 pointer += 4
                 pointers.append(child_node_offset)
@@ -597,7 +886,8 @@ class BTreeIndex(Index[K]):
         if not self.root:
             self.root = self._read_node(self.root_block_index)
 
-        key_part = key[0]
+        # Normalize key_part to match float32 precision if needed
+        key_part = self._normalize_key(key)[0]
         node = self.root
 
         # -------- Traverse internal nodes --------
@@ -651,6 +941,42 @@ class BTreeIndex(Index[K]):
             is_unique=self.unique
         )
         self._write_through_node(self.root_block_index, root_node)
+    
+    def _calculate_max_order(self) -> int:
+        """
+        Calculate conservative max order based on worst-case key sizes.
+        This ensures all keys will fit when serialized, enabling predictable
+        B-tree behavior with fixed order across all nodes.
+        """
+        # Calculate worst-case key size
+        max_key_size = 0
+        for key_type in self.key_types:
+            if isinstance(key_type, IntType):
+                max_key_size += 4  # 4 bytes for int
+            elif isinstance(key_type, FloatType):
+                max_key_size += 4  # 4 bytes for float
+            elif isinstance(key_type, CharType):
+                max_key_size += key_type.length  # max chars
+            elif isinstance(key_type, VarCharType):
+                max_key_size += 2 + key_type.max_length  # length prefix + max chars (worst case)
+        
+        # Add discriminator overhead for non-unique indexes
+        if not self.unique:
+            max_key_size += 6  # block_idx(4) + offset(2) discriminator
+        
+        # Determine worst-case space per entry
+        # Internal nodes: n keys + (n+1) pointers → n×key + (n+1)×4 → per entry: key+4, plus 4 extra
+        # Leaf nodes (both unique and non-unique): n keys + n pointers → n×key + n×6 → per entry: key+6
+        
+        # Leaf nodes are more restrictive: n×(key+6) ≤ available
+        # For non-unique, keys include discriminator, so max_key_size already accounts for it
+        bytes_per_entry = max_key_size + 6
+        
+        available_space = BLOCK_SIZE - 20
+        order = (available_space - 4) // bytes_per_entry
+        
+        # Minimum order of 2 for B-tree validity
+        return max(2, order)
     
     def _write_index_metadata(self):
         """
