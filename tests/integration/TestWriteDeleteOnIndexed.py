@@ -12,7 +12,8 @@ def setup_test():
         json.dump({}, f, indent=2)
     
     controller = IndexController()
-    controller.set_index("student", "id", "BTREE", True)
+    StorageEngine.set_index("student", "id", "BTREE", True)
+    StorageEngine.set_index("course", "year", "BTREE")
 
 def write_on_indexed_table(reraise: bool = False) -> tuple[bool, str]:
     dummy_insert = [
@@ -99,6 +100,30 @@ def delete_on_indexed_table(reraise: bool = False) -> tuple[bool, str]:
             raise e
         return False, f"Exception occurred: {e}"
 
+def write_non_unique(reraise: bool = False) -> tuple[bool, str]:
+    dummy_insert = [
+        [301, 2025, "IF2224", "Automata theory"],
+        [302, 2025, "IF3140", "Sistem Basis Data"],
+        [303, 2024, "IF2110", "Data Structures"],
+        [304, 2025, "IF2230", "Computer Networks"],
+        [305, 2024, "IF2150", "Operating Systems"],
+    ]
+
+    data_request : DataWrite = DataWrite(
+        "course",
+        ["id","year","code","description"],
+        [],
+        dummy_insert
+    )
+
+    try:
+        StorageEngine.write_block(data_request)
+        return True, ""
+    except Exception as e:
+        if reraise:
+            raise e
+        return False, f"Exception occurred: {e}"
+
 def test_all():
     def test(success: bool, message: str) -> str:
         test.counter += 1
@@ -115,6 +140,7 @@ def test_all():
     messages.append(test(*write_on_indexed_table()))
     messages.append(test(*write_duplicate_on_unique_index()))
     messages.append(test(*delete_on_indexed_table()))
+    messages.append(test(*write_non_unique()))
 
     print("=== INTEGRATION TESTING: Indexing with API ===")
     for message in messages:
