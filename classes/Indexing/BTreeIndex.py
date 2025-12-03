@@ -19,9 +19,8 @@ class BTreeNode:
     """
     Struktur node dalam B-Tree
     Untuk tree yang tidak unique, diperlukan diskriminator tambahan pada key.
-    Untuk leaf node, diskriminator adalah IndexPointer.
-    Untuk internal node, diskriminator akan diappend ke key untuk pencarian.
-    Selalu gunakan method get_key() untuk mendapatkan key.
+    Key pada index yang tidak unique akan diappend discriminator dalam pentimpanan
+    Gunakan get_pure_key() untuk mendapatkan key tanpa diskriminator
     """
     next_leaf: int
     parent_node: int
@@ -33,23 +32,28 @@ class BTreeNode:
     height: int = 0
     is_unique: bool = True
 
+    def get_num_keys(self) -> int:
+        return self.num_keys
+
     def get_key(self, index: int) -> K:
         """
         Mengembalikan key pada index tertentu, beserta diskriminator jika ada
         """
-        if not self.is_unique and self.is_leaf:
-            return self.keys[index] + (self.pointers[index].block_idx, self.pointers[index].offset)
         return self.keys[index]
 
     def get_pointer(self, index: int) -> int | IndexPointer:
+        if self.is_leaf and not self.is_unique:
+            discriminator = self.keys[index][-2:]  # Get discriminator from key
+            pointer = IndexPointer(block_idx=discriminator[0], offset=discriminator[1])
+            return pointer
         return self.pointers[index]
     
     def get_pure_key(self, index: int) -> K:
         """
         Mengembalikan key pada index tertentu, tanpa diskriminator
         """
-        if not self.is_unique and not self.is_leaf:
-            return self.keys[index][:-2]
+        if not self.is_unique:
+            return self.keys[index][:-2]  # Remove discriminator from key
         return self.keys[index]
 
     def search_key(self, key: K, disambiguator: IndexPointer | None = None) -> int | IndexPointer:
@@ -60,23 +64,19 @@ class BTreeNode:
         """
         if disambiguator is not None:
             key = key + (disambiguator.block_idx, disambiguator.offset)
-        elif not self.is_unique and self.is_leaf and self.num_keys > 0:
-            # For non-unique leaf nodes, pad search key with minimal values to ensure correct comparison
-            # Internal nodes already have discriminators in their keys
-            first_key = self.get_key(0)
-            if len(key) < len(first_key):
-                # Pad with 0s for comparison (assumes block_idx/offset are non-negative)
-                key = key + (0, 0)
+
+        if len(self.keys) == 0:
+            raise RuntimeError("BTreeNode has no keys to search.")
 
         # self.get_key(i) <= key < self.get_key(j)
         # with i+1 == j
         if key < self.get_key(0):
             return self.get_pointer(0)
-        if key >= self.get_key(self.num_keys - 1):
-            return self.get_pointer(self.num_keys)
+        if key >= self.get_key(self.get_num_keys() - 1):
+            return self.get_pointer(self.get_num_keys())
 
         i = 0
-        j = self.num_keys - 1
+        j = self.get_num_keys() - 1
         while i + 1 < j:
             left_key = self.get_key(i)
             if left_key == key:
@@ -109,22 +109,18 @@ class BTreeNode:
             return self.get_pointer(i)
 
     def insert_key(self, entry: IndexEntry[K], pointer: int | IndexPointer) -> bool:
-        # Default case
-        comparison_key = entry.key
         storage_key = entry.key
 
-        # Non-unique Leaf insertion case
         if not self.is_unique and isinstance(pointer, IndexPointer):
-            comparison_key = entry.key + (pointer.block_idx, pointer.offset)
-            storage_key = entry.key  # Store pure key for leaves
+            # Store pointer with the key
+            storage_key = entry.key + (pointer.block_idx, pointer.offset)
         
-        # Binary search using comparison_key
         insert_pos = 0
-        while insert_pos < self.num_keys and self.get_key(insert_pos) < comparison_key:
+        while insert_pos < self.get_num_keys() and self.get_key(insert_pos) < storage_key:
             insert_pos += 1
         
         # Check unique violation
-        if self.is_unique and insert_pos < self.num_keys and self.get_key(insert_pos) == comparison_key:
+        if self.is_unique and insert_pos < self.get_num_keys() and self.get_key(insert_pos) == storage_key:
             return False
         
         self.keys.insert(insert_pos, storage_key)
@@ -134,21 +130,19 @@ class BTreeNode:
 
     def delete_key(self, entry: IndexEntry[K]) -> bool:
         delete_idx: int = -1
-        for i in range(self.num_keys):
+        for i in range(self.get_num_keys()):
             if self.get_pure_key(i) == entry.key:
                 if self.is_unique:  # Gaperlu cek pointer (block_idx dan offset)
                     delete_idx = i
                     break
-                else:
-                    ptr = self.get_pointer(i)
-                    if isinstance(ptr, IndexPointer) and ptr == entry.pointer:
-                        delete_idx = i
-                        break
+                elif self.get_key(i) == entry.key + (entry.pointer.block_idx, entry.pointer.offset):
+                    delete_idx = i
+                    break
         if delete_idx == -1:
             return False
         
         self.keys.pop(delete_idx)
-        self.pointers.pop(delete_idx if not self.is_leaf else delete_idx)
+        self.pointers.pop(delete_idx)
         self.num_keys -= 1
         return True
 
@@ -156,7 +150,7 @@ class BTreeNode:
         """
         Returns a tuple: (left_node, middle_key, right_node)
         """
-        mid = math.ceil((self.num_keys - 1) / 2)  # Right-biased split
+        mid = math.ceil((self.get_num_keys() - 1) / 2)  # Right-biased split
         middle_key = IndexEntry(key=self.get_key(mid), pointer=self.get_pointer(mid) if self.is_leaf else None)
 
         if self.is_leaf:
@@ -662,6 +656,7 @@ class BTreeIndex(Index[K]):
         block_index (4 bytes): index blok tempat data disimpan
         byte_offset (2 bytes): offset byte dalam blok
         Pointer Structure (leaf, non-unique):
+            Pointer = <none>
             # NOTE: If non-unique, the block index and offset are stored in the key itself to prevent redundancy
         
         Continuation block for spanning node: 
@@ -709,8 +704,8 @@ class BTreeIndex(Index[K]):
                 else:
                     raise ValueError("[StorageManager] Unknown key type")
             
-            if not node.is_leaf and not self.unique:
-                # Append discriminator to key for internal non-unique nodes
+            if not self.unique:
+                # Append discriminator to key for non-unique trees
                 discriminated_key = node.get_key(key_idx)
                 serialized_node.append(struct.pack("<I", discriminated_key[-2]))  # block_idx
                 serialized_node.append(struct.pack("<H", discriminated_key[-1]))  # offset
@@ -719,8 +714,8 @@ class BTreeIndex(Index[K]):
         if not node.is_leaf:
             for pointer in node.pointers:
                 serialized_node.append(struct.pack("<I", pointer))
-        elif node.is_leaf:
-            # Both unique and non-unique leaf nodes need pointers serialized
+        elif node.is_leaf and self.unique:
+            # Non-unique leaf nodes store pointer in the key itself
             for pointer in node.pointers:
                 serialized_node.append(struct.pack("<I", pointer.block_idx))
                 serialized_node.append(struct.pack("<H", pointer.offset))
@@ -812,7 +807,7 @@ class BTreeIndex(Index[K]):
                     raise ValueError("[StorageManager] Unknown key type during deserialization")
                 key_parts.append(key_value)
             
-            if not is_leaf and not self.unique:
+            if not self.unique:
                 # Read discriminator for internal non-unique nodes
                 block_idx = struct.unpack("<I", block[pointer : pointer + 4])[0]
                 pointer += 4
@@ -824,14 +819,14 @@ class BTreeIndex(Index[K]):
 
         pointers: list[int | IndexPointer] = []
         for i in range(num_keys + (0 if is_leaf else 1)):
-            if is_leaf:
+            if is_leaf and self.unique:
                 # Both unique and non-unique leaf nodes: read pointer from disk
                 block_idx = struct.unpack("<I", block[pointer : pointer + 4])[0]
                 pointer += 4
                 offset = struct.unpack("<H", block[pointer : pointer + 2])[0]
                 pointer += 2
                 pointers.append(IndexPointer(block_idx=block_idx, offset=offset))
-            else:
+            elif not is_leaf:
                 # Internal node: read child block index
                 child_node_offset = struct.unpack("<I", block[pointer : pointer + 4])[0]
                 pointer += 4
