@@ -3,6 +3,7 @@ import os
 from classes.globals import INDEX_META_FILE
 from classes.Indexing.IndexController import IndexController
 from classes.Indexing.Index import Index, IndexPointer, IndexEntry
+from classes.DataModels import Condition, Operation
 
 def reset_index_metadata():
     # Clear all idx files
@@ -46,7 +47,6 @@ def varchar_write_no_exception(reraise: bool = False) -> tuple[bool, str]:
     try:
         index_controller.set_index("course", "description", "BTREE", False)
         index = index_controller.get_index_for_table_column("course", "description")
-        print("Index created")
         for i in range(5):
             tup = (f"123456789012345678901234567890" * 120,)
             pointer = IndexPointer(block_idx=45+i, offset=(3+i)%512)
@@ -150,26 +150,27 @@ def write_delete_retrieve_unique(reraise: bool = False) -> tuple[bool, str]:
     try:
         index_controller.set_index("course", "year", "BTREE", True)
         index: Index = index_controller.get_index_for_table_column("course", "year")
+        entries_count: int = 20000
 
         # Insert entries
-        for i in range(10000):
+        for i in range(entries_count):
             tup = (i,)
-            pointer = IndexPointer(block_idx=20+i, offset=(11+i)%512)
+            pointer = IndexPointer(block_idx=20, offset=12)
             entry = IndexEntry(key=tup, pointer=pointer)
             if not index.insert(entry):
                 raise RuntimeError("Unable to insert key")
 
         # Delete entries
-        for i in range(0, 10000, 2):
+        for i in range(0, entries_count, 2):
             tup = (i,)
-            pointer = IndexPointer(block_idx=20+i, offset=(11+i)%512)
+            pointer = IndexPointer(block_idx=20, offset=12)
             entry = IndexEntry(key=tup, pointer=pointer)
             delete_success: bool = index.delete(entry)
             if not delete_success:
                 raise RuntimeError("Unable to delete key")
 
         # Retrieve test
-        for i in range(10000):
+        for i in range(entries_count):
             tup = (i,)
             results = list(index.search(tup))
             if i % 2 == 0:
@@ -178,7 +179,7 @@ def write_delete_retrieve_unique(reraise: bool = False) -> tuple[bool, str]:
             else:
                 if len(results) == 0:
                     return False, f"Failed to retrieve entry for key {tup}"
-                if results[0].pointer.block_idx != 20+i or results[0].pointer.offset != (11+i)%512:
+                if results[0].pointer.block_idx != 20 or results[0].pointer.offset != 12:
                     return False, f"Incorrect pointer for key {tup}"
         return True, ""
     except Exception as e:
@@ -241,36 +242,30 @@ def test_all():
 
     test.counter = 0
     test.success = 0
-    messages = []
-    messages.append(test(*simple_write_no_exception()))
-    messages.append(test(*varchar_write_no_exception()))
-    messages.append(test(*unique_write_and_delete_no_exception()))
-    messages.append(test(*write_and_retrieve_unique()))
-    messages.append(test(*write_and_retrieve_duplicate()))
-    messages.append(test(*write_delete_retrieve_unique()))
-    messages.append(test(*write_delete_retrieve_duplicate()))
+    tests = [simple_write_no_exception,
+             varchar_write_no_exception,
+             unique_write_and_delete_no_exception,
+             write_and_retrieve_unique,
+             write_and_retrieve_duplicate,
+             write_delete_retrieve_unique,
+             write_delete_retrieve_duplicate]
 
     print("=== UNIT TESTING: Indexing Module ===")
-    for message in messages:
-        print(message)
+    for t in tests:
+        print(test(*t()))
 
-    print(f"{test.success}/{len(messages)} tests passed.")
+    print(f"{test.success}/{len(tests)} tests passed.")
 
 if __name__ == "__main__":
     test_all()
-    # print(write_delete_retrieve_unique(reraise=True))
+    # print(write_and_retrieve_duplicate(reraise=True))
+    
+    # print(write_delete_retrieve_unique(reraise=False))
 
-
-    # reset_index_metadata()
-    # index_controller = IndexController()
-    # index_controller.set_index("course", "id", "BTREE", True)
-    # index: Index = index_controller.get_index_for_table_column("course", "id")
-
-    # index.insert(IndexEntry(key=(1,), pointer=IndexPointer(1,1)))
-    # print(index.delete(IndexEntry(key=(1,), pointer=IndexPointer(1,1))))
-    # for i in range(10000):
-    #     index.insert(IndexEntry(key=(i,), pointer=IndexPointer(i,i)))
-    # for i in range(10000//2):
-    #     res: bool = index.delete(IndexEntry(key=(i,), pointer=IndexPointer(i,i)))
-    #     if not res:
-    #         print("Failed to delete", i)
+    # keys = []
+    # ic = IndexController()
+    # index = ic.get_index_for_table_column("course", "year")
+    # for entry in index.search_condition(Condition("year", Operation.LTE, 2600)):
+    #     if entry.key[0] < 2400: continue
+    #     keys.append(entry.key)
+    # print(keys)

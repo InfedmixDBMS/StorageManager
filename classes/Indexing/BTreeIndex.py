@@ -32,7 +32,24 @@ class BTreeNode:
     height: int = 0
     is_unique: bool = True
 
+    def __str__(self) -> str:
+        node_level = "L" if self.is_leaf else "I"
+        node_level += "R" if self.is_root else "N"
+        node_level += f"{self.height}"
+
+        pointers = []
+        for i in range(len(self.pointers)):
+            if self.is_leaf:
+                ptr = self.get_pointer(i)
+                pointers.append(f"({ptr.block_idx}, {ptr.offset})")
+            else:
+                pointers.append(str(self.get_pointer(i)))
+        return f"=== Node {node_level} {self.num_keys} keys\nKeys ({self.num_keys}): {', '.join(map(str, self.keys))}\nPointers ({len(self.pointers)}): {', '.join(pointers)}"
+
     def get_num_keys(self) -> int:
+        """
+        Mengembalikan jumlah key pada node
+        """
         return self.num_keys
 
     def get_key(self, index: int) -> K:
@@ -232,8 +249,8 @@ class BTreeIndex(Index[K]):
         need_write: bool = True
         while nodes_stack and need_write:
             # Check if node exceeds order threshol before writing
-            overflow_key: bool = nodes_stack[-1].num_keys >= self.order
-            
+            overflow_key: bool = nodes_stack[-1].get_num_keys() >= self.order
+
             if not overflow_key:
                 # Safe to write
                 self._write_through_node(idx_stack[-1], nodes_stack[-1])
@@ -289,8 +306,7 @@ class BTreeIndex(Index[K]):
                 self._write_through_node(left_block_idx, left_node)
                 self._write_through_node(right_block_idx, right_node)
             except Exception as e:
-                print(left_node.num_keys, right_node.num_keys)
-                print(f"Error writing nodes: {e}")
+                print(f"[StorageManager] Error writing index nodes: {e}")
                 return False
 
         return True
@@ -318,12 +334,12 @@ class BTreeIndex(Index[K]):
             return False
         
         # Check for underflow and rebalance if needed
-        if node.num_keys < self.min_keys and not node.is_root:
+        if node.get_num_keys() < self.min_keys and not node.is_root:
             # Get parent for underflow handling
             parent_idx = idx_stack[-2]
             parent = nodes_stack[-2]
             self._handle_underflow(node_idx, node, parent_idx, parent)
-        elif node.is_root and node.num_keys == 0 and not node.is_leaf:
+        elif node.is_root and node.get_num_keys() == 0 and not node.is_leaf:
             # Root empty but not leaf, promote only child as new root
             first_child_idx = node.pointers[0]
             first_child = self._read_node(first_child_idx)
@@ -391,10 +407,10 @@ class BTreeIndex(Index[K]):
                 right_sibling = self._read_node(right_sibling_idx)
         
         # Try borrowing from siblings
-        if left_sibling and left_sibling.num_keys > self.min_keys:
+        if left_sibling and left_sibling.get_num_keys() > self.min_keys:
             self._borrow_from_left(node_idx, node, left_sibling_idx, left_sibling, 
                                    parent_idx, parent, child_position)
-        elif right_sibling and right_sibling.num_keys > self.min_keys:
+        elif right_sibling and right_sibling.get_num_keys() > self.min_keys:
             self._borrow_from_right(node_idx, node, right_sibling_idx, right_sibling,
                                     parent_idx, parent, child_position)
         # Try merging
@@ -514,7 +530,7 @@ class BTreeIndex(Index[K]):
             # Leaf: just concatenate keys and pointers
             left_node.keys.extend(right_node.keys)
             left_node.pointers.extend(right_node.pointers)
-            left_node.num_keys += right_node.num_keys
+            left_node.num_keys += right_node.get_num_keys()
             
             # Update leaf chain to skip merged node
             left_node.next_leaf = right_node.next_leaf
@@ -523,8 +539,8 @@ class BTreeIndex(Index[K]):
             left_node.keys.append(separator_key)
             left_node.keys.extend(right_node.keys)
             left_node.pointers.extend(right_node.pointers)
-            left_node.num_keys += right_node.num_keys + 1
-            
+            left_node.num_keys += right_node.get_num_keys() + 1
+
             # Update all moved children's parent pointers
             for ptr in right_node.pointers:
                 if isinstance(ptr, int):
@@ -576,6 +592,7 @@ class BTreeIndex(Index[K]):
                 normalized.append(val)
         return tuple(normalized)
 
+    # --- INDEX SEARCH ---
     def search(self, key: K) -> Iterator[IndexEntry[K]]:
         if not self.root:
             self.root = self._read_node(self.root_block_index)
@@ -674,7 +691,7 @@ class BTreeIndex(Index[K]):
         # Header
         headers[0] = struct.pack("<I", node.next_leaf)
         headers[1] = struct.pack("<I", node.parent_node)
-        headers[2] = struct.pack("<H", node.num_keys)
+        headers[2] = struct.pack("<H", node.get_num_keys())
         headers[3] = struct.pack("<B", ord('L') if node.is_leaf else ord('I'))
         headers[4] = struct.pack("<B", ord('R') if node.is_root else ord('N'))
         headers[5] = struct.pack("<B", node.height + ord('0'))
@@ -682,7 +699,7 @@ class BTreeIndex(Index[K]):
         headers[7] = struct.pack("<I", 0)  # next block for spanning node
 
         # Keys
-        for key_idx in range(node.num_keys):
+        for key_idx in range(node.get_num_keys()):
             key = node.get_pure_key(key_idx)
             for i, key_type in enumerate(self.key_types):
                 try:
@@ -721,7 +738,7 @@ class BTreeIndex(Index[K]):
                 serialized_node.append(struct.pack("<H", pointer.offset))
 
         blob = b"".join(headers + serialized_node)
-        if len(blob) > BLOCK_SIZE and node.num_keys > 1:
+        if len(blob) > BLOCK_SIZE and node.get_num_keys() > 1:
             raise BTreeInsertedMaxKeyException("[BTreeIndex] Index node data exceeds block size")
         elif len(blob) > BLOCK_SIZE: # Allow 1 key node to overflow. Do not index VARCHAR guys
             # --- Spanning node ---
@@ -893,11 +910,11 @@ class BTreeIndex(Index[K]):
         # -------- Scan leaf nodes --------
         leaf = node
         idx = 0
-        while idx < leaf.num_keys and leaf.get_pure_key(idx)[0] < key_part:
+        while idx < leaf.get_num_keys() and leaf.get_pure_key(idx)[0] < key_part:
             idx += 1
 
         while True:
-            while idx < leaf.num_keys:
+            while idx < leaf.get_num_keys():
                 yield IndexEntry(key=leaf.get_pure_key(idx), pointer=leaf.get_pointer(idx))
                 idx += 1
 
@@ -992,8 +1009,10 @@ class BTreeIndex(Index[K]):
                 metadata.append(struct.pack("<B", ord('f')))
             elif isinstance(typ, CharType):
                 metadata.append(struct.pack("<B", ord('c')))
+                metadata.append(struct.pack("<H", typ.length))
             elif isinstance(typ, VarCharType):
                 metadata.append(struct.pack("<B", ord('v')))
+                metadata.append(struct.pack("<H", typ.max_length))
 
         self.io.write(0, b"".join(metadata))
 
@@ -1018,17 +1037,20 @@ class BTreeIndex(Index[K]):
         types = []
         for _ in range(key_count):
             key_type = struct.unpack("<B", block[pointer : pointer + 1])[0]
+            if key_type == ord('i'):
+                key_type = IntType()
+            elif key_type == ord('f'):
+                key_type = FloatType()
+            elif key_type == ord('c'):
+                length = struct.unpack("<H", block[pointer + 1 : pointer + 3])[0]
+                key_type = CharType(length=length)
+                pointer += 2
+            elif key_type == ord('v'):
+                max_length = struct.unpack("<H", block[pointer + 1 : pointer + 3])[0]
+                key_type = VarCharType(max_length=max_length)
+                pointer += 2
+            else:
+                raise ValueError("[StorageManager] Unknown key type in metadata")
             types.append(key_type)
             pointer += 1
-
-        if len(types) != len(self.key_types):
-            raise ValueError("[StorageManager] Key types count in metadata does not match initialized key types count")
-        for i, t in enumerate(types):
-            if t == ord('i') and not isinstance(self.key_types[i], IntType):
-                raise ValueError("[StorageManager] Key type mismatch for key column {}".format(i))
-            elif t == ord('f') and not isinstance(self.key_types[i], FloatType):
-                raise ValueError("[StorageManager] Key type mismatch for key column {}".format(i))
-            elif t == ord('c') and not isinstance(self.key_types[i], CharType):
-                raise ValueError("[StorageManager] Key type mismatch for key column {}".format(i))
-            elif t == ord('v') and not isinstance(self.key_types[i], VarCharType):
-                raise ValueError("[StorageManager] Key type mismatch for key column {}".format(i))
+        self.key_types = types
