@@ -171,31 +171,33 @@ class StorageEngine:
         serializer.load_schema(table)
 
         inserted_values : list = []
-        inserted_columns : set = data_write.column
         schema_columns : list = serializer.schema["columns"]
+        
+        input_col_map = {name: i for i, name in enumerate(data_write.column)}
         inc : int = 0
         next_row_id_in_stats = StorageEngine.get_next_row_id(table)
+
         for row in data_write.new_value:
             new_row : list = []
-            i_idx : int = 0
-            sch_idx : int = 0
-            while sch_idx < len(schema_columns):
-                col = schema_columns[sch_idx]
-                if i_idx < len(inserted_columns) and col["name"] == inserted_columns[i_idx]:  # Provided column
-                    new_row.append(row[i_idx])
-                    i_idx += 1
-                # Imputation
-                elif col['name'] == '__row_id':
+            for col in schema_columns:
+                col_name = col["name"]
+                if col_name in input_col_map:
+                    val_idx = input_col_map[col_name]
+                    new_row.append(row[val_idx])
+                
+                elif col_name == '__row_id':
                     new_row.append(next_row_id_in_stats + inc)
+                elif col_name == "id":
+                    new_row.append(0) 
                 elif col["type"] == "int":
                     new_row.append(0)
                 elif col["type"] == "float":
                     new_row.append(0.0)
                 elif col["type"] == "char" or col["type"] == "varchar":
                     new_row.append("")
-                sch_idx += 1
+            
             inserted_values.append(new_row)
-            inc+=1
+            inc += 1
         
         # Index pada tabel terkait
         index_controller: IndexController = IndexController()
