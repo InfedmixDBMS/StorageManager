@@ -11,28 +11,16 @@
     "unique": true,
     "type": "BTREE"
   },
-  "course_description_BTREE.idx": {
-    "file_path": "storage/data/course_description_BTREE.idx.dat",
+  "course_year_BTREE.idx": {
+    "file_path": "storage/data/course_year_BTREE.idx.dat",
     "table": "course",
     "columns": [
-      "description"
-    ],
-    "key_type": [
-      "varchar"
-    ],
-    "unique": false,
-    "type": "BTREE"
-  },
-  "course_id_BTREE.idx": {
-    "file_path": "storage/data/course_id_BTREE.idx.dat",
-    "table": "course",
-    "columns": [
-      "id"
+      "year"
     ],
     "key_type": [
       "int"
     ],
-    "unique": true,
+    "unique": false,
     "type": "BTREE"
   }
 }

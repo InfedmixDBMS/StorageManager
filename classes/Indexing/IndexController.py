@@ -131,5 +131,4 @@ class IndexController:
                 pass
             else:
                 raise ValueError(f"Unknown index method: {type}")
-            
             self.index_map[index_name].load_metadata()
