@@ -42,7 +42,6 @@ class StorageEngine:
     def read_block(data_retrieval: DataRetrieval) -> Rows:
         table: str = data_retrieval.table
         io = IO(table)
-        print("ini nama tabel" + str(table))
         serializer = Serializer()
         serializer.load_schema(table)
         ic : IndexController = IndexController()
@@ -61,10 +60,10 @@ class StorageEngine:
             idx_list.append((condition, a))
 
         if(there_is_index):
-            print('baca pake index')
             block_offset_mapping : Dict[int, list[int]]= {}
             unhandled_condition : list[Condition] = []
             data_in_block : list[list]= None
+            list_offset_in_block = None
 
             for condition, index in idx_list:
                 if(index):
@@ -79,64 +78,42 @@ class StorageEngine:
                         block_offset_mapping.setdefault(block_idx, []).append(offset)
                 else:
                     unhandled_condition.append(condition)
-            print(block_offset_mapping)
-            print("diatas ini si offset mapping")
-
-            res_tuple = []
-
-            for block_idx, offsets in block_offset_mapping.items():
-                raw_io_dat: bytes = io.read(block_idx)
-                
-                # parse seluruh block hanya sekali
-                list_offset_coba = []
-                rows = serializer.deserialize(raw_io_dat, list_offset_coba)
-
-                # mapping: offset -> row
-                offset_to_row = dict(zip(list_offset_coba, rows))
-
-                for offset in offsets:
-                    if offset in offset_to_row:
-                        print("record at", block_idx, offset, offset_to_row[offset])
-                    else:
-                        print("offset not found:", offset)
 
 
-            # for block_idx, list_offset in block_offset_mapping.items():
-            #     raw_data_in_block : bytearray = io.read(block_idx)
-            #     list_offset_in_block : list[int] = []
+            for block_idx, list_offset in block_offset_mapping.items():
+                raw_data_in_block : bytearray = io.read(block_idx)
+                list_offset_in_block : list[int] = []
 
-            #     while True:
-            #         try:
-            #             data_in_block = serializer.deserialize(raw_data_in_block, list_offset_in_block)
-            #             break
-            #         except SerializerIncompleteBlockException as e:
-            #             for _ in range(e.additional_needed_blocks):
-            #                 next_idx = next(block_idx_gen, None)
-            #                 if next_idx is None:
-            #                     raise RuntimeError(
-            #                         "Unexpected EOF while reading multi-block record"
-            #                     )
+                while True:
+                    try:
+                        data_in_block = serializer.deserialize(raw_data_in_block, list_offset_in_block)
+                        break
+                    except SerializerIncompleteBlockException as e:
+                        for _ in range(e.additional_needed_blocks):
+                            next_idx = next(block_idx_gen, None)
+                            if next_idx is None:
+                                raise RuntimeError(
+                                    "Unexpected EOF while reading multi-block record"
+                                )
 
-            #                 raw_data_in_block.extend(io.read(next_idx))
+                            raw_data_in_block.extend(io.read(next_idx))
 
-            #     print()
-            #     print()
-            #     print("ini bagian loop while true")
-            #     print()
-            #     print(raw_data_in_block)
-            #     print("diatas ini raw data in block")
-            #     print(data_in_block)
-            #     print("diatas ini data in block")
-            #     print(block_idx)
-            #     print("diatas ini block idx")
-            #     print(list_offset_in_block)
-            #     print("diatas ini list offset di blok")
+                schemaCols = StorageEngine.load_schema_names(table)
+                for offset in (list_offset):
+                    if offset in list_offset_in_block:  
+                        valid_idx = list_offset_in_block.index(offset)
+                        valid_data = data_in_block[valid_idx]
 
+                        if data_retrieval.column:
+                            projected_data = [
+                                valid_data[col_idx]
+                                for col_idx, colName in enumerate(schemaCols)
+                                if colName in data_retrieval.column
+                            ]
+                            res.append(projected_data)
+                        else:
+                            res.append(valid_data)
 
-            #     data_index : list[int] = [i for i,idx in enumerate(list_offset_in_block) if idx in list_offset]
-
-            #     for i in data_index:
-            #         res.append(data_in_block[i])
 
         else:
 
@@ -163,10 +140,6 @@ class StorageEngine:
 
                             full_chunk.extend(io.read(next_idx))
 
-                print("diatas ini data in block")
-                print(idx)
-                print("diatas ini block idx")
-                print(list_offset_in_block)
                 for row in data:
                     passed = True
                     for condition in data_retrieval.conditions:
@@ -201,6 +174,7 @@ class StorageEngine:
                             res.append(projected_row)
                         else:
                             res.append(row)
+        
 
         return Rows(
             columns=data_retrieval.column if data_retrieval.column else all_columns,
@@ -272,15 +246,10 @@ class StorageEngine:
         while row < len(inserted_values):
             serialized_data : bytes = serializer.serialize([inserted_values[row]])
             serialized_data_length : int = len(serialized_data)
-            serializer.deserialize(serialized_data)
-            print("ini serialized data_length " + str(serialized_data_length))
-            
             
             # === Insert index
             for col_idx, index in indices:
                 key = (inserted_values[row][col_idx],)
-                print("ini last block idx" + str(last_block_idx))
-                print("ini si offsetnya: " + str(written_block_length))
                 pointer = IndexPointer(block_idx=last_block_idx, offset=written_block_length)
                 entry = IndexEntry(key=key, pointer=pointer)
                 try:
