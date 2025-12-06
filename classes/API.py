@@ -10,7 +10,7 @@ from classes.DataModels import DataRetrieval, DataWrite, DataDeletion, Condition
 from classes.DataModels import Schema,Rows
 from classes.Indexing.IndexController import IndexController
 from classes.Indexing.Index import Index, IndexPointer, IndexEntry, UniqueIndexViolationException
-from classes.globals import CATALOG_FILE, BLOCK_SIZE, STATS_BASE_PATH
+from classes.globals import CATALOG_FILE, BLOCK_SIZE, STATS_BASE_PATH, INDEX_META_FILE
 from typing import Dict, Iterator
 import json
 import operator
@@ -342,7 +342,9 @@ class StorageEngine:
                         return res
                     block += io.read(idx)
 
-            rows = serializer.deserialize(block)
+            # rows = serializer.deserialize(block)
+            offsets: list[int] = []
+            rows = serializer.deserialize(block, offsets)
             flag_delete = [False] * len(rows)
 
             for condition in data_deletion.conditions:
@@ -382,7 +384,8 @@ class StorageEngine:
                 for col_idx, index in indices:
                     # TODO: kalau non-unique index, harus tau block_idx dan offsetnya juga
                     key = (rows[i][col_idx],)
-                    pointer = None  
+                    # pointer = None
+                    pointer = IndexPointer(block_idx=idx, offset=offsets[i])
                     entry = IndexEntry(key=key, pointer=pointer)
                     index.delete(entry)
             
@@ -397,6 +400,31 @@ class StorageEngine:
                 new_block = b'\x00' * BLOCK_SIZE
 
             io.write(idx ,new_block)
+            
+            # === Update index entries for remaining rows with new offsets
+            # After reorganizing the block, remaining rows have moved to new byte positions
+            # We need to delete old entries and re-insert with new offsets
+            if len(new_rows) > 0 and indices:
+                # First delete old entries for remaining rows
+                for i in range(len(rows)):
+                    if flag_delete[i]:
+                        continue  # Already deleted above
+                    for col_idx, index in indices:
+                        key = (rows[i][col_idx],)
+                        pointer = IndexPointer(block_idx=idx, offset=offsets[i])
+                        entry = IndexEntry(key=key, pointer=pointer)
+                        index.delete(entry)
+                
+                # Then re-insert with new offsets
+                new_offsets: list[int] = []
+                serializer.deserialize(new_block, new_offsets)
+                for i, row in enumerate(new_rows):
+                    for col_idx, index in indices:
+                        key = (row[col_idx],)
+                        pointer = IndexPointer(block_idx=idx, offset=new_offsets[i])
+                        entry = IndexEntry(key=key, pointer=pointer)
+                        index.insert(entry)
+            
             idx = next(block_idx_gen, None)
         
         return res
@@ -540,6 +568,14 @@ class StorageEngine:
                 # Update max_row_id
                 StorageEngine._update_max_row_id(table, max_row_id)
                 
+                # Rebuild all indexes for this table
+                try:
+                    StorageEngine._rebuild_indexes_for_table(table)
+                except Exception as index_error:
+                    print(f"Warning: Index rebuild failed during defragmentation: {index_error}")
+                    print(f"Data file was successfully compacted, but indexes may be invalid.")
+                    raise index_error
+                
                 print(f"Defragmentation completed for table '{table}'. Active rows: {len(active_rows)}")
             except Exception as e:
                 if os.path.exists(temp_path):
@@ -585,6 +621,103 @@ class StorageEngine:
         except Exception as e:
             print(f"Error in get_next_row_id: {e}")
             return 0
+
+    @staticmethod
+    def _rebuild_indexes_for_table(table: str) -> None:
+        """
+        Rebuilds all indexes for a table after defragmentation.
+        This is necessary because defragmentation moves rows to new block/offset locations.
+        
+        Raises:
+            Exception: If any index rebuild fails
+        """
+        try:
+            index_controller = IndexController()
+            serializer = Serializer()
+            serializer.load_schema(table)
+            
+            # Load existing metadata to preserve it
+            try:
+                with open(INDEX_META_FILE, "r") as f:
+                    index_metadata = json.load(f)
+            except FileNotFoundError:
+                index_metadata = {}
+            
+            # Count indexes to rebuild
+            indexes_to_rebuild = [
+                (index_name, index_meta) 
+                for index_name, index_meta in index_controller.index_schema.items() 
+                if index_meta["table"] == table
+            ]
+            
+            if not indexes_to_rebuild:
+                print(f"No indexes found for table '{table}'")
+                return
+            
+            print(f"Rebuilding {len(indexes_to_rebuild)} index(es) for table '{table}'")
+            
+            # Rebuild each index
+            failed_indexes = []
+            for index_name, index_meta in indexes_to_rebuild:
+                try:
+                    index = index_controller.get_index(index_name)
+                    if not index:
+                        print(f"Warning: Could not load index object '{index_name}'")
+                        failed_indexes.append((index_name, "Index object not found"))
+                        continue
+                    
+                    print(f"Rebuilding index '{index_name}'")
+                    
+                    # Clear the index file before rebuilding
+                    if os.path.exists(index.io.file_path):
+                        os.remove(index.io.file_path)
+                    
+                    index.root = None
+                    
+                    # Rebuild from scratch
+                    index.build_index(serializer)
+                    index.load_metadata()
+                    
+                    # Preserve index metadata entry
+                    if index_name in index_metadata:
+                        # Keep the existing metadata (file path, table, columns, etc.)
+                        pass
+                    else:
+                        # If not in metadata, add it
+                        index_metadata[index_name] = {
+                            "table": table,
+                            "columns": index_meta.get("columns", []),
+                            "index_file": index_meta.get("index_file", ""),
+                            "type": index_meta.get("type", "BTREE"),
+                            "unique": index_meta.get("unique", False),
+                        }
+                    
+                    print(f"Index '{index_name}' rebuilt successfully.")
+                    
+                except Exception as e:
+                    error_msg = f"Failed to rebuild index '{index_name}': {str(e)}"
+                    print(f"Fail: {error_msg}")
+                    failed_indexes.append((index_name, str(e)))
+            
+            # Write metadata back to ensure persistence
+            try:
+                with open(INDEX_META_FILE, "w") as f:
+                    json.dump(index_metadata, f, indent=2)
+            except Exception as e:
+                print(f"Warning: Failed to write index metadata: {e}")
+            
+            # Report results
+            if failed_indexes:
+                error_list = "\n".join([f"    - {name}: {err}" for name, err in failed_indexes])
+                raise RuntimeError(
+                    f"Failed to rebuild {len(failed_indexes)} index(es):\n{error_list}"
+                )
+            
+            print(f"Successfully rebuilt all {len(indexes_to_rebuild)} indexes for table '{table}'")
+            
+        except Exception as e:
+            print(f"Error rebuilding indexes for table '{table}': {e}")
+            raise
 
     @staticmethod
     def _update_max_row_id(table: str, max_row_id: int) -> None:
