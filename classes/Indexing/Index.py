@@ -111,7 +111,8 @@ class Index(ABC, Generic[K]):
         """
         self._initialize_index_file()
 
-        data_io = IO(serializer.schema["file_path"])
+        # data_io = IO(serializer.schema["file_path"])
+        data_io = IO(self.table)
         col_idx: int = 0
         for i, col in enumerate(serializer.schema["columns"]):
             if col["name"] == self.columns[0]:
@@ -139,8 +140,12 @@ class Index(ABC, Generic[K]):
                 rows = serializer.deserialize(block_data, offsets)
             
             for i, row in enumerate(rows):
-                key = row[col_idx]
-                self.insert(key, IndexPointer(block_idx=index_block, offset=offsets[i]))
+                # key = row[col_idx]
+                # self.insert(key, IndexPointer(block_idx=index_block, offset=offsets[i]))
+                key = (row[col_idx],)
+                pointer = IndexPointer(block_idx=index_block, offset=offsets[i])
+                entry = IndexEntry(key=key, pointer=pointer)
+                self.insert(entry)
                 res += 1
             block_idx += 1
 
