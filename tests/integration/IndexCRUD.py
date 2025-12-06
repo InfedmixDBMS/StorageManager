@@ -1,4 +1,6 @@
 import json
+import os
+import glob
 from classes.Indexing.IndexController import IndexController
 from classes.Indexing.Index import IndexPointer, IndexEntry, UniqueIndexViolationException
 from classes.DataModels import Schema, Statistic, DataRetrieval, Rows, Condition,Operation, DataWrite, DataDeletion
@@ -8,6 +10,18 @@ from classes.API import StorageEngine
 
 
 def setup_test():
+    file_patterns = [
+        "storage/data/*.dat",
+        "storage/index/*.dat",
+        "storage/statistics/*.json",
+    ]
+    for pattern in file_patterns:
+        for file_path in glob.glob(pattern):
+            try:
+                os.remove(file_path)
+            except OSError as e:
+                print(f"Error removing file {file_path}: {e}")
+
     with open(INDEX_META_FILE, "w") as f:
         json.dump({}, f, indent=2)
     
@@ -124,6 +138,45 @@ def write_non_unique(reraise: bool = False) -> tuple[bool, str]:
             raise e
         return False, f"Exception occurred: {e}"
 
+def read_with_index(reraise: bool = False) -> tuple[bool, str]:
+    try:
+        # Search for student with id 105
+        condition = Condition(column="id", operation=Operation.EQ, operand=112)
+        data_request = DataRetrieval(
+            table="student",
+            column=["id", "name", "ipk"],
+            conditions=[condition]
+        )
+        
+        result_rows = StorageEngine.read_block(data_request)
+        
+        if result_rows.row_count != 1:
+            return False, f"Expected 1 row, but got {result_rows.row_count}"
+            
+        student_data = result_rows.to_dict()[0]
+        
+        expected_data = {"id": 105, "name": "Eva Green", "ipk": 4.0}
+        if student_data["id"] != expected_data["id"] or student_data["name"] != expected_data["name"] or abs(student_data["ipk"] - expected_data["ipk"]) > 1e-9:
+            return False, f"Incorrect data returned. Expected {expected_data}, got {student_data}"
+
+        condition_gt = Condition(column="id", operation=Operation.GT, operand=115)
+        data_request_gt = DataRetrieval(
+            table="student",
+            column=["id"],
+            conditions=[condition_gt]
+        )
+
+        result_rows_gt = StorageEngine.read_block(data_request_gt)
+        if result_rows_gt.row_count != 3:
+            return False, f"Expected 3 rows for GT, but got {result_rows_gt.row_count}"
+        
+        return True, ""
+
+    except Exception as e:
+        if reraise:
+            raise e
+        return False, f"Exception occurred: {e}"
+
 def test_all():
     def test(success: bool, message: str) -> str:
         test.counter += 1
@@ -141,6 +194,7 @@ def test_all():
     messages.append(test(*write_duplicate_on_unique_index()))
     messages.append(test(*delete_on_indexed_table()))
     messages.append(test(*write_non_unique()))
+    messages.append(test(*read_with_index()))
 
     print("=== INTEGRATION TESTING: Indexing with API ===")
     for message in messages:
