@@ -570,7 +570,7 @@ class StorageEngine:
             print(f"Error updating max_row_id: {e}")
 
     @staticmethod
-    def update_stats(table: str = "all") -> None:
+    def update_stats(table: str = "all") -> bool:
         """
             Updates the statistics file for the given table
             This function recalculates the statistics from the data file
@@ -633,8 +633,10 @@ class StorageEngine:
             with open(file_path, "w") as f:
                 json.dump(stats, f, indent=2)
             print(f"LOG: Statistics for table {table} updated successfully.")
+            return True
         except Exception as e:
             print("Unexpected error")
+            return False
 
 
     #Helper method
