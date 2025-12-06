@@ -92,7 +92,7 @@ def test_read():
 
     # storageIO.write(0, data)
 
-    data_request : DataRetrieval = DataRetrieval("student", [], [Condition('ipk', Operation.GTE, 3.8)])
+    data_request : DataRetrieval = DataRetrieval("student", [], [Condition('id', Operation.GTE, 101)])
     res: Rows = StorageEngine.read_block(data_request)
     
     for i in range (res.row_count):
@@ -170,6 +170,11 @@ def test_delete():
     berhasil = StorageEngine.delete_block(data_del)
     print("Row Affected " + str(berhasil))
 
+def test_set_index():
+    StorageEngine.set_index('student', 'ipk', 'BTREE', True)
+
+
+
 if __name__ == "__main__":
     # Clean up previous test runs
     # if os.path.exists("storage/data/student.dat"):
@@ -180,13 +185,12 @@ if __name__ == "__main__":
     # test_read_block_api()
     # test_delete_block_api()
     # test_update_stats( )
-    # test_write()
-    # test_read()
+    test_read()
 
-    test_read()
-    print()
-    print()
-    test_delete()
-    print()
-    print()
-    test_read()
+    # test_read()
+    # print()
+    # print()
+    # test_delete()
+    # print()
+    # print()
+    # test_read()

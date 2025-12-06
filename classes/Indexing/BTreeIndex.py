@@ -141,7 +141,10 @@ class BTreeNode:
             return False
         
         self.keys.insert(insert_pos, storage_key)
-        self.pointers.insert(insert_pos + 1, pointer)
+        if self.is_leaf:
+            self.pointers.insert(insert_pos, pointer)
+        else:
+            self.pointers.insert(insert_pos + 1, pointer)
         self.num_keys += 1
         return True
 
@@ -738,9 +741,10 @@ class BTreeIndex(Index[K]):
                 serialized_node.append(struct.pack("<H", pointer.offset))
 
         blob = b"".join(headers + serialized_node)
-        if len(blob) > BLOCK_SIZE and node.get_num_keys() > 1:
-            raise BTreeInsertedMaxKeyException("[BTreeIndex] Index node data exceeds block size")
-        elif len(blob) > BLOCK_SIZE: # Allow 1 key node to overflow. Do not index VARCHAR guys
+        # if len(blob) > BLOCK_SIZE and node.get_num_keys() > 1:
+        #     raise BTreeInsertedMaxKeyException("[BTreeIndex] Index node data exceeds block size")
+        # elif len(blob) > BLOCK_SIZE: # Allow 1 key node to overflow. Do not index VARCHAR guys
+        if len(blob) > BLOCK_SIZE: # Allow 1 key node to overflow. Do not index VARCHAR guys
             # --- Spanning node ---
             # Allocate at least 1 continuation block
             new_block_idx = self.io.get_last_block_index() + 1
@@ -987,8 +991,8 @@ class BTreeIndex(Index[K]):
         available_space = BLOCK_SIZE - 20
         order = (available_space - 4) // bytes_per_entry
         
-        # Minimum order of 2 for B-tree validity
-        return max(2, order)
+        # Minimum order of 3 for B-tree validity
+        return max(3, order)
     
     def _write_index_metadata(self):
         """
