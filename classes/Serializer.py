@@ -120,7 +120,6 @@ class Serializer:
 
             tuple_header : bytes = raw_data[pointer : pointer+header_size]
             delete_flag, tuple_length = struct.unpack(ROW_HEADER, tuple_header)
-            print("ini tuple length di deserialize " + str(tuple_length))
             
             if delete_flag == b'\x00' and tuple_length == 0: # Likely padding
                 break

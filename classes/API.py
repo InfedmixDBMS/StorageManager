@@ -42,7 +42,6 @@ class StorageEngine:
     def read_block(data_retrieval: DataRetrieval) -> Rows:
         table: str = data_retrieval.table
         io = IO(table)
-        print("ini nama tabel" + str(table))
         serializer = Serializer()
         serializer.load_schema(table)
         ic : IndexController = IndexController()
@@ -72,15 +71,11 @@ class StorageEngine:
                     for idx_entry in it:
                         idx_pointer = idx_entry.pointer
                         block_idx = idx_pointer.block_idx
-                        print("ini block index di iteratornya " + str(block_idx))
                         offset = idx_pointer.offset
-                        print("ini offset di iteratornya " + str(offset))
-                        print()
                         block_offset_mapping.setdefault(block_idx, []).append(offset)
                 else:
                     unhandled_condition.append(condition)
             print(block_offset_mapping)
-            print("diatas ini si offset mapping")
 
             res_tuple = []
 
@@ -163,10 +158,6 @@ class StorageEngine:
 
                             full_chunk.extend(io.read(next_idx))
 
-                print("diatas ini data in block")
-                print(idx)
-                print("diatas ini block idx")
-                print(list_offset_in_block)
                 for row in data:
                     passed = True
                     for condition in data_retrieval.conditions:
@@ -273,14 +264,11 @@ class StorageEngine:
             serialized_data : bytes = serializer.serialize([inserted_values[row]])
             serialized_data_length : int = len(serialized_data)
             serializer.deserialize(serialized_data)
-            print("ini serialized data_length " + str(serialized_data_length))
             
             
             # === Insert index
             for col_idx, index in indices:
                 key = (inserted_values[row][col_idx],)
-                print("ini last block idx" + str(last_block_idx))
-                print("ini si offsetnya: " + str(written_block_length))
                 pointer = IndexPointer(block_idx=last_block_idx, offset=written_block_length)
                 entry = IndexEntry(key=key, pointer=pointer)
                 try:
