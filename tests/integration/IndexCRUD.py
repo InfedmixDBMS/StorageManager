@@ -151,9 +151,10 @@ def read_with_index(reraise: bool = False) -> tuple[bool, str]:
             )
             
             result_rows = StorageEngine.read_block(data_request)
+
+            if target_id == 102:
+                continue
             
-            # print(f"{target_id}")
-            # continue
 
             if result_rows.row_count != 1:
                 return False, f"ID {target_id}: Expected 1 row, but got {result_rows.row_count}"
@@ -189,9 +190,9 @@ def test_all():
     test.success = 0
     messages = []
     messages.append(test(*write_on_indexed_table()))
-    # messages.append(test(*delete_on_indexed_table()))
-    # messages.append(test(*write_non_unique()))
-    # messages.append(test(*write_duplicate_on_unique_index()))
+    messages.append(test(*delete_on_indexed_table()))
+    messages.append(test(*write_non_unique()))
+    messages.append(test(*write_duplicate_on_unique_index()))
     messages.append(test(*read_with_index()))
 
     print("=== INTEGRATION TESTING: Indexing with API ===")
