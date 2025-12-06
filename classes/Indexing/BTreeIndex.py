@@ -141,7 +141,10 @@ class BTreeNode:
             return False
         
         self.keys.insert(insert_pos, storage_key)
-        self.pointers.insert(insert_pos + 1, pointer)
+        if self.is_leaf:
+            self.pointers.insert(insert_pos, pointer)
+        else:
+            self.pointers.insert(insert_pos + 1, pointer)
         self.num_keys += 1
         return True
 

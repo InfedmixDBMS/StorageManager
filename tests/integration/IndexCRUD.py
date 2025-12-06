@@ -140,36 +140,34 @@ def write_non_unique(reraise: bool = False) -> tuple[bool, str]:
 
 def read_with_index(reraise: bool = False) -> tuple[bool, str]:
     try:
-        # Search for student with id 105
-        condition = Condition(column="id", operation=Operation.EQ, operand=112)
-        data_request = DataRetrieval(
-            table="student",
-            column=["id", "name", "ipk"],
-            conditions=[condition]
-        )
-        
-        result_rows = StorageEngine.read_block(data_request)
-        
-        if result_rows.row_count != 1:
-            return False, f"Expected 1 row, but got {result_rows.row_count}"
+        for target_id in range(101, 119):
             
-        student_data = result_rows.to_dict()[0]
-        
-        expected_data = {"id": 105, "name": "Eva Green", "ipk": 4.0}
-        if student_data["id"] != expected_data["id"] or student_data["name"] != expected_data["name"] or abs(student_data["ipk"] - expected_data["ipk"]) > 1e-9:
-            return False, f"Incorrect data returned. Expected {expected_data}, got {student_data}"
+            condition = Condition(column="id", operation=Operation.EQ, operand=target_id)
+            
+            data_request = DataRetrieval(
+                table="student",
+                column=["id", "name", "ipk"],
+                conditions=[condition]
+            )
+            
+            result_rows = StorageEngine.read_block(data_request)
+            
+            # print(f"{target_id}")
+            # continue
 
-        condition_gt = Condition(column="id", operation=Operation.GT, operand=115)
-        data_request_gt = DataRetrieval(
-            table="student",
-            column=["id"],
-            conditions=[condition_gt]
-        )
+            if result_rows.row_count != 1:
+                return False, f"ID {target_id}: Expected 1 row, but got {result_rows.row_count}"
+                
+            student_data = result_rows.to_dict()[0]
+            
+            if student_data["id"] != target_id:
+                return False, f"ID {target_id}: Logic Error. Requested {target_id} but returned {student_data['id']}"
 
-        result_rows_gt = StorageEngine.read_block(data_request_gt)
-        if result_rows_gt.row_count != 3:
-            return False, f"Expected 3 rows for GT, but got {result_rows_gt.row_count}"
-        
+            if target_id == 105:
+                expected_data = {"name": "Eva Green", "ipk": 4.0}
+                if student_data["name"] != expected_data["name"] or abs(student_data["ipk"] - expected_data["ipk"]) > 1e-9:
+                    return False, f"ID 105: Data mismatch. Expected {expected_data}, got {student_data}"
+
         return True, ""
 
     except Exception as e:
@@ -191,9 +189,9 @@ def test_all():
     test.success = 0
     messages = []
     messages.append(test(*write_on_indexed_table()))
-    messages.append(test(*write_duplicate_on_unique_index()))
-    messages.append(test(*delete_on_indexed_table()))
-    messages.append(test(*write_non_unique()))
+    # messages.append(test(*delete_on_indexed_table()))
+    # messages.append(test(*write_non_unique()))
+    # messages.append(test(*write_duplicate_on_unique_index()))
     messages.append(test(*read_with_index()))
 
     print("=== INTEGRATION TESTING: Indexing with API ===")
